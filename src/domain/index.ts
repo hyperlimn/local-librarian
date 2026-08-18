@@ -8,3 +8,4 @@ export type * from "./json.js";
 export type * from "./library-root.js";
 export type * from "./proposed-operation.js";
 export type * from "./provenance.js";
+export type * from "./reconciliation.js";
