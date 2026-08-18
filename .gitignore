@@ -1,0 +1,67 @@
+# Dependencies, builds, and tool caches
+node_modules/
+.npm-cache/
+dist/
+web-dist/
+coverage/
+.cache/
+.vite/
+.vitest/
+.turbo/
+*.tsbuildinfo
+*.eslintcache
+
+# Local Librarian runtime state must never be committed.
+/.local-librarian*/
+/.local-state*/
+enrollments.jsonl
+worker-status.json
+heartbeat.json
+heartbeat-status.json
+*.heartbeat
+*.heartbeat.json
+*.pid
+*.pid.lock
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Local environment and credential material
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+*.der
+
+# Logs and temporary/test output
+*.log
+tmp/
+.tmp/
+temp/
+test-results/
+playwright-report/
+blob-report/
+
+# Editors and operating-system metadata
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

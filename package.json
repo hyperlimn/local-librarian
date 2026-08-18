@@ -1,0 +1,40 @@
+{
+  "name": "local-librarian",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Safety-first, MCP-oriented architecture for organizing local file libraries.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:web": "vite build --config web/vite.config.ts",
+    "check": "npm run check:server && npm run check:web",
+    "check:server": "tsc --noEmit",
+    "check:web": "tsc -p web/tsconfig.json --noEmit",
+    "inventory": "node dist/cli/inventory.js",
+    "jobs:diagnostic": "node dist/cli/diagnostic-jobs.js",
+    "roots:enroll": "node dist/cli/root-enroll.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "librarian": "npm run build && node dist/web/main.js",
+    "web": "node dist/web/main.js",
+    "worker:diagnostic": "node dist/cli/diagnostic-worker.js",
+    "worker:local": "node dist/cli/local-worker.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.2.0",
+    "typescript": "^5.6.0",
+    "vite": "^7.3.6",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}
