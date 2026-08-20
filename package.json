@@ -16,6 +16,7 @@
     "check:web": "tsc -p web/tsconfig.json --noEmit",
     "inventory": "node dist/cli/inventory.js",
     "jobs:diagnostic": "node dist/cli/diagnostic-jobs.js",
+    "reconcile": "node dist/cli/reconciliation.js",
     "roots:enroll": "node dist/cli/root-enroll.js",
     "test": "vitest run",
     "test:watch": "vitest",
