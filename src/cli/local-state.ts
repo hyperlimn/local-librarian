@@ -15,6 +15,7 @@ export interface LocalStatePaths {
   readonly directory: string;
   readonly jobsDatabase: string;
   readonly inventoryDatabase: string;
+  readonly organizationDatabase: string;
   readonly enrollmentsJournal: string;
   readonly workerStatus: string;
 }
@@ -63,6 +64,7 @@ export function localStatePaths(directory: string): LocalStatePaths {
     directory: absolute,
     jobsDatabase: resolve(absolute, "jobs.sqlite"),
     inventoryDatabase: resolve(absolute, "inventory.sqlite"),
+    organizationDatabase: resolve(absolute, "organization.sqlite"),
     enrollmentsJournal: resolve(absolute, "enrollments.jsonl"),
     workerStatus: resolve(absolute, "worker-status.json"),
   };

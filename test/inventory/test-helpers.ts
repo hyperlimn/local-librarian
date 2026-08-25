@@ -22,6 +22,10 @@ import {
 } from "../../src/jobs/index.js";
 import { InventoryTools } from "../../src/mcp/index.js";
 import {
+  ORGANIZATION_EXECUTE_JOB_DEFINITION,
+  ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+} from "../../src/organization/index.js";
+import {
   PathBoundary,
   ReadOnlyCanonicalPathResolver,
   ReadOnlyRootPathResolver,
@@ -85,7 +89,11 @@ export async function createInventoryFixture(): Promise<InventoryTestFixture> {
 export function createJobQueue(databasePath: string): SqlitePersistentJobQueue {
   return new SqlitePersistentJobQueue({
     databasePath,
-    definitions: [INVENTORY_SCAN_JOB_DEFINITION],
+    definitions: [
+      INVENTORY_SCAN_JOB_DEFINITION,
+      ORGANIZATION_EXECUTE_JOB_DEFINITION,
+      ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+    ],
   });
 }
 

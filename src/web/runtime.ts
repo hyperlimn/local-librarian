@@ -16,6 +16,13 @@ import {
   WorkerStatusStore,
 } from "../jobs/index.js";
 import { ReadOnlyCanonicalPathResolver } from "../safety/index.js";
+import {
+  ORGANIZATION_EXECUTE_JOB_DEFINITION,
+  ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+  OrganizationPlannerService,
+  OrganizationService,
+  SqliteOrganizationStore,
+} from "../organization/index.js";
 import { INVENTORY_SCAN_JOB_DEFINITION } from "../scanner/index.js";
 import { LocalApiRouter } from "./api-router.js";
 import { LocalLibrarianApplication } from "./application-service.js";
@@ -35,16 +42,26 @@ export class LocalWebRuntime {
   public readonly stateDirectory: string;
   readonly #jobs: SqlitePersistentJobQueue;
   readonly #catalog: SqliteInventoryCatalog;
+  readonly #worker: LocalWorkerProcessManager;
+  readonly #organization: SqliteOrganizationStore;
 
   public constructor(options: LocalWebRuntimeOptions = {}) {
     this.stateDirectory = resolveLocalStateDirectory(options.stateDirectory);
     const paths = localStatePaths(this.stateDirectory);
     this.#jobs = new SqlitePersistentJobQueue({
       databasePath: paths.jobsDatabase,
-      definitions: [DIAGNOSTIC_COUNT_JOB_DEFINITION, INVENTORY_SCAN_JOB_DEFINITION],
+      definitions: [
+        DIAGNOSTIC_COUNT_JOB_DEFINITION,
+        INVENTORY_SCAN_JOB_DEFINITION,
+        ORGANIZATION_EXECUTE_JOB_DEFINITION,
+        ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+      ],
     });
     this.#catalog = new SqliteInventoryCatalog({
       databasePath: paths.inventoryDatabase,
+    });
+    this.#organization = new SqliteOrganizationStore({
+      databasePath: paths.organizationDatabase,
     });
     const enrollments = new JsonlRootEnrollmentStore(paths.enrollmentsJournal);
     const canonicalizer = new ReadOnlyCanonicalPathResolver();
@@ -53,7 +70,13 @@ export class LocalWebRuntime {
       new SystemVolumeIdentityProvider(),
       enrollments,
     );
-    const worker = new LocalWorkerProcessManager({
+    const organization = new OrganizationService(
+      new OrganizationPlannerService(this.#catalog, enrollments, this.#organization),
+      this.#organization,
+      this.#jobs,
+      enrollments,
+    );
+    this.#worker = new LocalWorkerProcessManager({
       stateDirectory: this.stateDirectory,
       statusStore: new WorkerStatusStore(paths.workerStatus),
     });
@@ -62,9 +85,11 @@ export class LocalWebRuntime {
       enrollments,
       this.#jobs,
       this.#catalog,
+      organization,
       new WindowsDriveDiscovery(),
-      worker,
+      this.#worker,
       paths,
+      "1.0.0",
     );
     this.server = new LocalWebServer({
       router: new LocalApiRouter(application),
@@ -74,8 +99,14 @@ export class LocalWebRuntime {
     });
   }
 
+  /** Ensures queued work is processed without requiring a separate setup step. */
+  public startWorker() {
+    return this.#worker.start();
+  }
+
   public async close(): Promise<void> {
     await this.server.close();
+    this.#organization.close();
     this.#catalog.close();
     this.#jobs.close();
   }

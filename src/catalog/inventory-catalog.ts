@@ -129,6 +129,11 @@ export interface InventoryCatalog {
   listScans(query?: InventoryScanListQuery): Promise<InventoryScanPage>;
   list(rootId: LibraryRootId, query?: InventoryListQuery): Promise<InventoryPage>;
   get(recordId: InventoryRecordId): Promise<InventoryRecord | undefined>;
+  hasObservedPath(
+    rootId: LibraryRootId,
+    scanId: InventoryScanId,
+    relativePath: RootRelativePath,
+  ): Promise<boolean>;
 }
 
 export interface SqliteInventoryCatalogOptions {
@@ -533,6 +538,22 @@ export class SqliteInventoryCatalog implements InventoryCatalog {
     const row = this.#database.prepare(`SELECT * FROM inventory_records
       WHERE id = ?`).get(recordId) as unknown as InventoryRecordRow | undefined;
     return row === undefined ? undefined : recordFromRow(row);
+  }
+
+  public async hasObservedPath(
+    rootId: LibraryRootId,
+    scanId: InventoryScanId,
+    relativePath: RootRelativePath,
+  ): Promise<boolean> {
+    const collation = process.platform === "win32" ? " COLLATE NOCASE" : "";
+    const row = this.#database.prepare(`SELECT 1 AS present FROM inventory_records
+      WHERE root_id = ? AND scan_id = ? AND relative_path = ?${collation}
+      AND observation_status = 'observed' LIMIT 1`).get(
+      rootId,
+      scanId,
+      relativePath,
+    ) as unknown as { present: number } | undefined;
+    return row !== undefined;
   }
 
   #latestScanId(rootId: LibraryRootId): InventoryScanId | undefined {

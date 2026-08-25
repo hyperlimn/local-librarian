@@ -7,16 +7,18 @@ import { SafetyIndicator } from "../components/SafetyIndicator";
 import { ScanProgress } from "../components/ScanProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatBytes, formatDate, shortId } from "../format";
-import type { Job, LibraryView, Scan, WorkerStatus } from "../types";
+import type { Job, LibraryView, OrganizationPlan, OrganizationRun, Scan, SystemState, WorkerStatus } from "../types";
 
 interface DashboardData {
   libraries: LibraryView[];
   activeJobs: Job[];
   recentJobs: Job[];
   recentScans: Scan[];
+  recentPlans: OrganizationPlan[];
+  recentRuns: OrganizationRun[];
   worker: WorkerStatus;
   attention: Array<{ kind: string; id: string; message: string }>;
-  system: { fileMutation: string; safetyStatus: string };
+  system: SystemState;
 }
 
 export function DashboardPage({ navigate }: { readonly navigate: (page: string) => void }) {
@@ -52,16 +54,16 @@ export function DashboardPage({ navigate }: { readonly navigate: (page: string) 
         <div>
           <span className="eyebrow">Local overview</span>
           <h1>Your libraries, quietly organized.</h1>
-          <p>Read-only metadata inventory with durable background work and explicit root approval.</p>
+          <p>Inventory messy storage, preview a clear organization policy, test it read-only, then apply and undo reviewed moves.</p>
         </div>
-        <SafetyIndicator compact />
+        <SafetyIndicator compact mode={data.system.mutationMode.mode} />
       </section>
 
       {error && <div className="notice notice--error">{error}</div>}
       <section className="stat-strip">
         <Stat value={data.libraries.filter((item) => item.root.approval.status === "approved").length} label="Approved libraries" />
         <Stat value={data.activeJobs.length} label="Active jobs" />
-        <Stat value={data.recentScans.length} label="Recent scans" />
+        <Stat value={data.recentPlans.length} label="Organization plans" />
         <div className="stat-card stat-card--worker">
           <span>Worker</span><StatusBadge status={data.worker.status} />
           {(data.worker.status === "offline" || data.worker.status === "stale") && <button className="button button--mini" onClick={() => void startWorker()}>Start worker</button>}
@@ -76,6 +78,14 @@ export function DashboardPage({ navigate }: { readonly navigate: (page: string) 
           <LibraryCard key={library.root.id} library={library} onBrowse={() => navigate("inventory")} />
         ))}
         {data.libraries.length === 0 && <EmptyCard title="No libraries enrolled" copy="Choose a mounted drive or folder, review it, and explicitly approve it." action="Enroll a library" onAction={() => navigate("libraries")} />}
+      </section>
+      <SectionHeader title="Organization plans" action="Plan and organize" onAction={() => navigate("organize")} />
+      <section className="compact-scan-list">
+        {data.recentPlans.slice(0, 4).map((plan) => {
+          const run = data.recentRuns.find((candidate) => candidate.planId === plan.id);
+          return <article className="compact-scan" key={plan.id}><div><strong>{shortId(plan.id)}</strong><small>{plan.options.strategy.replaceAll("-", " ")} · {formatDate(plan.createdAt)}</small></div><div><span>{plan.counts.plannedMoves.toLocaleString()} moves</span><span>{formatBytes(plan.counts.representedBytes)}</span></div><StatusBadge status={run?.status ?? plan.status} /></article>;
+        })}
+        {data.recentPlans.length === 0 && <div className="quiet-card">Create a plan from a completed inventory to begin organizing.</div>}
       </section>
 
       <div className="two-column">

@@ -11,6 +11,11 @@ import type { DriveDiscovery } from "../../src/web/drive-discovery.js";
 import type { WorkerManager } from "../../src/web/worker-process-manager.js";
 import type { WorkerStatusView } from "../../src/jobs/index.js";
 import {
+  OrganizationPlannerService,
+  OrganizationService,
+  SqliteOrganizationStore,
+} from "../../src/organization/index.js";
+import {
   createCatalog,
   createInventoryFixture,
   createInventoryWorker,
@@ -23,6 +28,7 @@ interface Harness {
   readonly router: LocalApiRouter;
   readonly queue: ReturnType<typeof createJobQueue>;
   readonly catalog: ReturnType<typeof createCatalog>;
+  readonly organization: SqliteOrganizationStore;
   readonly worker: FakeWorkerManager;
   cleanup(): Promise<void>;
 }
@@ -113,6 +119,126 @@ describe("Local Web API", () => {
     const filtered = await dispatch(harness.router, "GET", `/api/libraries/${harness.fixture.root.id}/inventory?extension=txt&limit=10`);
     expect(items(filtered).map((record) => (record as { extension?: string }).extension)).toEqual(["txt", "txt"]);
   });
+  it("compares two completed scan snapshots without touching the filesystem", async () => {
+    const harness = await trackedHarness();
+    await writeFile(path.join(harness.fixture.rootPath, "baseline.txt"), "stable", "utf8");
+    const baselineSubmission = await dispatch(
+      harness.router,
+      "POST",
+      `/api/libraries/${harness.fixture.root.id}/scans`,
+    );
+    const baselineJobId = (baselineSubmission.body as { jobId: JobId }).jobId;
+    await createInventoryWorker(
+      harness.queue,
+      harness.catalog,
+      harness.fixture.store,
+    ).runOnce();
+    const baseline = await harness.catalog.getScanByJob(baselineJobId);
+
+    await writeFile(path.join(harness.fixture.rootPath, "added.txt"), "new", "utf8");
+    const comparisonSubmission = await dispatch(
+      harness.router,
+      "POST",
+      `/api/libraries/${harness.fixture.root.id}/scans`,
+    );
+    const comparisonJobId = (comparisonSubmission.body as { jobId: JobId }).jobId;
+    await createInventoryWorker(
+      harness.queue,
+      harness.catalog,
+      harness.fixture.store,
+    ).runOnce();
+    const comparison = await harness.catalog.getScanByJob(comparisonJobId);
+
+    const response = await dispatch(harness.router, "POST", "/api/reconciliation", {
+      rootId: harness.fixture.root.id,
+      baselineScanId: baseline!.id,
+      comparisonScanId: comparison!.id,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      rootId: harness.fixture.root.id,
+      baselineScanId: baseline!.id,
+      comparisonScanId: comparison!.id,
+      deltas: [expect.objectContaining({ relativePath: "added.txt", kind: "added" })],
+    });
+    await expectResponse(harness.router, "POST", "/api/reconciliation", {
+      rootId: harness.fixture.root.id,
+      baselineScanId: baseline!.id,
+      comparisonScanId: baseline!.id,
+    }, 400, "DISTINCT_SCANS_REQUIRED");
+  });
+
+  it("exposes reviewable plans and keeps live mutation behind both API interlocks", async () => {
+    const harness = await trackedHarness();
+    await writeFile(path.join(harness.fixture.rootPath, "messy.pdf"), "document", "utf8");
+    const submitted = await dispatch(
+      harness.router,
+      "POST",
+      `/api/libraries/${harness.fixture.root.id}/scans`,
+    );
+    const scanJobId = (submitted.body as { jobId: JobId }).jobId;
+    await createInventoryWorker(
+      harness.queue,
+      harness.catalog,
+      harness.fixture.store,
+    ).runOnce();
+    expect((await harness.queue.get(scanJobId))?.status).toBe("completed");
+
+    const created = await dispatch(harness.router, "POST", "/api/organization/plans", {
+      rootId: harness.fixture.root.id,
+      strategy: "category",
+      scope: "top-level",
+      targetDirectory: "Organized",
+      collisionPolicy: "rename-with-suffix",
+      createdBy: "web-test",
+    });
+    expect(created.status).toBe(201);
+    const plan = created.body as { id: string; counts: { plannedMoves: number } };
+    expect(plan.counts.plannedMoves).toBe(1);
+    expect(items(await dispatch(
+      harness.router,
+      "GET",
+      `/api/organization/plans/${encodeURIComponent(plan.id)}/operations`,
+    ))).toHaveLength(1);
+
+    const simulation = await dispatch(
+      harness.router,
+      "POST",
+      `/api/organization/plans/${encodeURIComponent(plan.id)}/runs`,
+      { mode: "simulation", approvedBy: "web-test", confirmation: "SIMULATE" },
+    );
+    expect(simulation.status).toBe(202);
+    expect(simulation.body).toMatchObject({ mode: "simulation", status: "queued" });
+
+    await expectResponse(
+      harness.router,
+      "POST",
+      "/api/safety/mutation-mode",
+      { mode: "live", updatedBy: "web-test", confirmation: "wrong" },
+      400,
+      "REQUEST_REJECTED",
+    );
+    expect((await dispatch(harness.router, "POST", "/api/safety/mutation-mode", {
+      mode: "live",
+      updatedBy: "web-test",
+      confirmation: "ENABLE LIVE FILE MUTATION",
+    })).body).toMatchObject({ mode: "live" });
+    expect((await dispatch(
+      harness.router,
+      "POST",
+      `/api/libraries/${harness.fixture.root.id}/write-access`,
+      {
+        allowWrites: true,
+        approvedBy: "web-test",
+        confirmation: "ENABLE LIBRARY WRITES",
+      },
+    )).body).toMatchObject({ policy: { allowWrites: true } });
+    expect((await dispatch(harness.router, "GET", "/api/system")).body).toMatchObject({
+      fileMutation: "ENABLED",
+      filesystemExecution: "live",
+      capabilities: { liveRelocation: true, rollback: true },
+    });
+  });
 
   it("reports drive metadata from discovery without invoking worker or scan", async () => {
     const harness = await trackedHarness();
@@ -127,6 +253,14 @@ async function createHarness(): Promise<Harness> {
   const fixture = await createInventoryFixture();
   const queue = createJobQueue(fixture.jobsPath);
   const catalog = createCatalog(fixture.inventoryPath);
+  const statePaths = localStatePaths(fixture.statePath);
+  const organization = new SqliteOrganizationStore({
+    databasePath: statePaths.organizationDatabase,
+  });
+  const organizationService = new OrganizationService(
+    new OrganizationPlannerService(catalog, fixture.store, organization),
+    organization, queue, fixture.store,
+  );
   const worker = new FakeWorkerManager();
   const drives: DriveDiscovery = {
     discover: () => Promise.resolve([{
@@ -142,6 +276,7 @@ async function createHarness(): Promise<Harness> {
     fixture.store,
     queue,
     catalog,
+    organizationService,
     drives,
     worker,
     localStatePaths(fixture.statePath),
@@ -153,7 +288,8 @@ async function createHarness(): Promise<Harness> {
     queue,
     catalog,
     worker,
-    cleanup: async () => { catalog.close(); queue.close(); await fixture.cleanup(); },
+    organization,
+    cleanup: async () => { organization.close(); catalog.close(); queue.close(); await fixture.cleanup(); },
   };
 }
 

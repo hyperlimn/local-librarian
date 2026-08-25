@@ -16,6 +16,8 @@ export type JobStatus =
 export type KnownJobKind =
   | "diagnostic.count"
   | "inventory.scan"
+  | "organization.execute"
+  | "organization.rollback"
   | "content.hash"
   | "duplicates.detect"
   | "media.analyze"

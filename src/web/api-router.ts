@@ -51,14 +51,29 @@ export class LocalApiRouter {
       return ok(await this.application.dashboard());
     }
     if (request.method === "GET" && segments.length === 2 && segments[1] === "system") {
-      return ok(this.application.system());
+      return ok(await this.application.system());
     }
     if (request.method === "GET" && segments.length === 2 && segments[1] === "safety") {
-      const [libraries, worker] = await Promise.all([
+      const [libraries, worker, system, auditIntegrity] = await Promise.all([
         this.application.libraries(true),
         this.application.workerStatus(),
+        this.application.system(),
+        this.application.verifyOrganizationAudit(),
       ]);
-      return ok({ system: this.application.system(), libraries, worker });
+      return ok({ system, libraries, worker, auditIntegrity });
+    }
+    if (
+      request.method === "POST" &&
+      segments.length === 3 &&
+      segments[1] === "safety" &&
+      segments[2] === "mutation-mode"
+    ) {
+      const body = objectBody(request.body, ["mode", "updatedBy", "confirmation"]);
+      return ok(await this.application.setMutationMode(
+        enumField(body, "mode", ["read-only", "live"] as const),
+        stringField(body, "updatedBy", 200),
+        stringField(body, "confirmation", 200),
+      ));
     }
     if (request.method === "GET" && segments.length === 2 && segments[1] === "drives") {
       return ok({ items: await this.application.discoveredVolumes() });
@@ -104,6 +119,25 @@ export class LocalApiRouter {
       return ok(await this.application.revokeEnrollment(
         rootId as EnrolledRootId,
         stringField(body, "reason", 500),
+      ));
+    }
+    if (
+      request.method === "POST" &&
+      segments.length === 4 &&
+      segments[1] === "libraries" &&
+      segments[3] === "write-access"
+    ) {
+      const body = objectBody(request.body, ["allowWrites", "approvedBy", "confirmation"]);
+      const allowWrites = booleanField(body, "allowWrites");
+      const confirmation = stringField(body, "confirmation", 200);
+      const expected = allowWrites ? "ENABLE LIBRARY WRITES" : "DISABLE LIBRARY WRITES";
+      if (confirmation !== expected) {
+        throw new ApiInputError(400, "CONFIRMATION_REQUIRED", `Type ${expected} to change library write access.`);
+      }
+      return ok(await this.application.setLibraryWriteAccess(
+        libraryRootId(segments[2]),
+        allowWrites,
+        stringField(body, "approvedBy", 200),
       ));
     }
     if (
@@ -167,6 +201,174 @@ export class LocalApiRouter {
       const scan = await this.application.scan(inventoryScanId(segments[2]));
       if (scan === undefined) throw new ApiInputError(404, "SCAN_NOT_FOUND", "Scan not found.");
       return ok(scan);
+    }
+    if (
+      request.method === "POST" &&
+      segments.length === 2 &&
+      segments[1] === "reconciliation"
+    ) {
+      const body = objectBody(request.body, [
+        "rootId",
+        "baselineScanId",
+        "comparisonScanId",
+      ]);
+      const baselineScanId = inventoryScanId(stringField(body, "baselineScanId", 256));
+      const comparisonScanId = inventoryScanId(stringField(body, "comparisonScanId", 256));
+      if (baselineScanId === comparisonScanId) {
+        throw new ApiInputError(
+          400,
+          "DISTINCT_SCANS_REQUIRED",
+          "Choose two different completed scans to compare.",
+        );
+      }
+      return ok(await this.application.compareScans(
+        libraryRootId(stringField(body, "rootId", 256)),
+        baselineScanId,
+        comparisonScanId,
+      ));
+    }
+
+    if (
+      segments[1] === "organization" &&
+      segments[2] === "plans" &&
+      segments.length === 3
+    ) {
+      if (request.method === "GET") {
+        return ok(await this.application.organizationPlans(
+          request.query?.["rootId"] === undefined
+            ? undefined
+            : libraryRootId(request.query["rootId"]),
+          limitQuery(request.query?.["limit"], 100),
+          queryString(request.query?.["cursor"], "cursor", 4_096),
+        ));
+      }
+      const body = objectBody(request.body, [
+        "rootId", "strategy", "scope", "targetDirectory", "collisionPolicy",
+        "includeHidden", "maximumOperations", "createdBy",
+      ]);
+      const strategy = optionalEnumField(
+        body,
+        "strategy",
+        ["category", "category-and-year", "year-and-month"] as const,
+      );
+      const scope = optionalEnumField(body, "scope", ["top-level", "all-files"] as const);
+      const collisionPolicy = optionalEnumField(
+        body,
+        "collisionPolicy",
+        ["skip", "rename-with-suffix"] as const,
+      );
+      const targetDirectory = optionalStringField(body, "targetDirectory", 500);
+      const includeHidden = optionalBooleanField(body, "includeHidden");
+      const maximumOperations = optionalIntegerField(body, "maximumOperations", 1, 50_000);
+      const plan = await this.application.createOrganizationPlan({
+        rootId: libraryRootId(stringField(body, "rootId", 256)),
+        createdBy: stringField(body, "createdBy", 200),
+        ...(strategy === undefined ? {} : { strategy }),
+        ...(scope === undefined ? {} : { scope }),
+        ...(targetDirectory === undefined ? {} : { targetDirectory }),
+        ...(collisionPolicy === undefined ? {} : { collisionPolicy }),
+        ...(includeHidden === undefined ? {} : { includeHidden }),
+        ...(maximumOperations === undefined ? {} : { maximumOperations }),
+      });
+      return { status: 201, body: plan };
+    }
+    if (
+      segments[1] === "organization" &&
+      segments[2] === "plans" &&
+      segments.length >= 4
+    ) {
+      const planId = organizationPlanId(segments[3]);
+      if (request.method === "GET" && segments.length === 4) {
+        const plan = await this.application.organizationPlan(planId);
+        if (plan === undefined) {
+          throw new ApiInputError(404, "PLAN_NOT_FOUND", "Organization plan not found.");
+        }
+        return ok(plan);
+      }
+      if (request.method === "GET" && segments.length === 5 && segments[4] === "operations") {
+        return ok(await this.application.organizationOperations(
+          planId,
+          limitQuery(request.query?.["limit"], 200),
+          queryString(request.query?.["cursor"], "cursor", 4_096),
+        ));
+      }
+      if (request.method === "POST" && segments.length === 5 && segments[4] === "runs") {
+        const body = objectBody(request.body, ["mode", "approvedBy", "confirmation"]);
+        return {
+          status: 202,
+          body: await this.application.startOrganizationRun({
+            planId,
+            mode: enumField(body, "mode", ["simulation", "live"] as const),
+            approvedBy: stringField(body, "approvedBy", 200),
+            confirmation: stringField(body, "confirmation", 200),
+          }),
+        };
+      }
+    }
+    if (
+      request.method === "GET" &&
+      segments.length === 3 &&
+      segments[1] === "organization" &&
+      segments[2] === "runs"
+    ) {
+      return ok(await this.application.organizationRuns(
+        queryString(request.query?.["planId"], "planId", 256),
+        limitQuery(request.query?.["limit"], 100),
+        queryString(request.query?.["cursor"], "cursor", 4_096),
+      ));
+    }
+    if (
+      segments[1] === "organization" &&
+      segments[2] === "runs" &&
+      segments.length >= 4
+    ) {
+      const runId = organizationRunId(segments[3]);
+      if (request.method === "GET" && segments.length === 4) {
+        const run = await this.application.organizationRun(runId);
+        if (run === undefined) {
+          throw new ApiInputError(404, "RUN_NOT_FOUND", "Organization run not found.");
+        }
+        return ok(run);
+      }
+      if (request.method === "GET" && segments.length === 5 && segments[4] === "items") {
+        return ok(await this.application.organizationRunItems(
+          runId,
+          limitQuery(request.query?.["limit"], 200),
+          queryString(request.query?.["cursor"], "cursor", 4_096),
+        ));
+      }
+      if (request.method === "POST" && segments.length === 5 && segments[4] === "rollback") {
+        const body = objectBody(request.body, ["mode", "approvedBy", "confirmation"]);
+        return {
+          status: 202,
+          body: await this.application.startOrganizationRollback({
+            sourceRunId: runId,
+            mode: enumField(body, "mode", ["simulation", "live"] as const),
+            approvedBy: stringField(body, "approvedBy", 200),
+            confirmation: stringField(body, "confirmation", 200),
+          }),
+        };
+      }
+    }
+    if (
+      request.method === "GET" &&
+      segments.length === 3 &&
+      segments[1] === "organization" &&
+      segments[2] === "audit"
+    ) {
+      return ok(await this.application.organizationAudit(
+        limitQuery(request.query?.["limit"], 200),
+        queryString(request.query?.["cursor"], "cursor", 4_096),
+      ));
+    }
+    if (
+      request.method === "GET" &&
+      segments.length === 4 &&
+      segments[1] === "organization" &&
+      segments[2] === "audit" &&
+      segments[3] === "integrity"
+    ) {
+      return ok(await this.application.verifyOrganizationAudit());
     }
     if (request.method === "GET" && segments.length === 2 && segments[1] === "jobs") {
       const status = optionalEnum(request.query?.["status"], [
@@ -264,6 +466,78 @@ function stringField(
   }
   return value.trim();
 }
+function enumField<const Values extends readonly string[]>(
+  object: Record<string, unknown>,
+  field: string,
+  values: Values,
+): Values[number] {
+  const value = object[field];
+  if (typeof value !== "string" || !(values as readonly string[]).includes(value)) {
+    throw new ApiInputError(400, "INVALID_FIELD", `Invalid ${field}.`);
+  }
+  return value as Values[number];
+}
+
+function optionalEnumField<const Values extends readonly string[]>(
+  object: Record<string, unknown>,
+  field: string,
+  values: Values,
+): Values[number] | undefined {
+  return object[field] === undefined ? undefined : enumField(object, field, values);
+}
+
+function optionalStringField(
+  object: Record<string, unknown>,
+  field: string,
+  maximumLength: number,
+): string | undefined {
+  return object[field] === undefined ? undefined : stringField(object, field, maximumLength);
+}
+
+function booleanField(object: Record<string, unknown>, field: string): boolean {
+  const value = object[field];
+  if (typeof value !== "boolean") {
+    throw new ApiInputError(400, "INVALID_FIELD", `${field} must be boolean.`);
+  }
+  return value;
+}
+
+function optionalBooleanField(
+  object: Record<string, unknown>,
+  field: string,
+): boolean | undefined {
+  return object[field] === undefined ? undefined : booleanField(object, field);
+}
+
+function optionalIntegerField(
+  object: Record<string, unknown>,
+  field: string,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  const value = object[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new ApiInputError(
+      400,
+      "INVALID_FIELD",
+      `${field} must be an integer from ${minimum} to ${maximum}.`,
+    );
+  }
+  return value;
+}
+
+function queryString(
+  value: string | undefined,
+  name: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined || value.length === 0) return undefined;
+  if (value.length > maximumLength) {
+    throw new ApiInputError(400, "INVALID_QUERY", `${name} is too long.`);
+  }
+  return value;
+}
 
 function identifier(
   value: string | undefined,
@@ -294,6 +568,21 @@ function inventoryScanId(value: string | undefined): InventoryScanId {
 
 function inventoryRecordId(value: string | undefined): InventoryRecordId {
   return identifier(value, "inventory record", /^inventory-record-v1:[0-9a-f]{64}$/u) as InventoryRecordId;
+}
+function organizationPlanId(value: string | undefined): string {
+  return identifier(
+    value,
+    "organization plan",
+    /^organization-plan-v1:[0-9a-f-]{36}$/u,
+  );
+}
+
+function organizationRunId(value: string | undefined): string {
+  return identifier(
+    value,
+    "organization run",
+    /^organization-run-v1:[0-9a-f-]{36}$/u,
+  );
 }
 
 function limitQuery(value: string | undefined, fallback: number): number {

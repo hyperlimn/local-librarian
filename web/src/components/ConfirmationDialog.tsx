@@ -8,6 +8,7 @@ export function ConfirmationDialog({
   danger = false,
   busy = false,
   hideCancel = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -18,6 +19,7 @@ export function ConfirmationDialog({
   readonly danger?: boolean;
   readonly busy?: boolean;
   readonly hideCancel?: boolean;
+  readonly confirmDisabled?: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
@@ -30,7 +32,7 @@ export function ConfirmationDialog({
         <div className="dialog__content">{children}</div>
         <div className="dialog__actions">
           {!hideCancel && <button className="button button--ghost" onClick={onCancel} disabled={busy}>Cancel</button>}
-          <button className={`button ${danger ? "button--danger" : "button--primary"}`} onClick={onConfirm} disabled={busy}>
+          <button className={`button ${danger ? "button--danger" : "button--primary"}`} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {busy ? "Working…" : confirmLabel}
           </button>
         </div>

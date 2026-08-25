@@ -420,3 +420,120 @@ input:focus, select:focus { border-color: #61a081; box-shadow: 0 0 0 3px rgb(55 
   .root-row, .root-row > div { align-items: flex-start; flex-direction: column; }
   [data-theme="dark"] .mobile-header { background: #0c1713; }
 }
+/* Turnkey organization workflow */
+.notice--success { border: 1px solid #cce0d2; color: #31684e; background: #edf7f0; }
+.sidebar-safety--live .sidebar-safety__dot { background: #f1b656; box-shadow: 0 0 0 4px rgb(241 182 86 / 13%); }
+.safety-indicator--live { border-color: #e2c079; color: #744d12; background: #fff3d8; }
+.safety-indicator--live .safety-indicator__icon { background: #b97a22; }
+.safety-indicator--live p { color: #765f39; }
+.status--live, .status--write-approved { color: #8d4e13; background: #fae5bd; }
+.status--read-only, .status--verified, .status--ready { color: #286348; background: #e1f0e6; }
+.status--partial { color: #8b601d; background: #f7edcf; }
+
+.mode-banner, .safety-control-panel, .organize-builder, .execution-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 24px 28px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--paper);
+}
+.mode-banner p, .safety-control-panel p, .organize-builder p, .execution-panel p { max-width: 740px; margin-bottom: 0; }
+.mode-banner > div:last-child, .safety-control-panel__state { display: grid; justify-items: end; gap: 9px; }
+.mode-banner--read-only { border-color: #cfe0d4; background: linear-gradient(120deg, #f5fbf6, #edf5ef); }
+.mode-banner--live { border-color: #e0bd77; background: linear-gradient(120deg, #fffaf0, #fff0d2); }
+.safety-control-panel { border-left: 5px solid var(--green-bright); }
+.safety-control-panel__state small { max-width: 320px; color: var(--muted); font-size: .66rem; text-align: right; }
+
+.organize-builder { align-items: start; }
+.organize-builder > div:first-child { flex: 0 1 430px; }
+.organize-form { display: grid; width: min(720px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.organize-form .button { align-self: end; justify-self: start; }
+.checkbox-control { display: flex; align-items: center; gap: 9px; padding-top: 22px; }
+.checkbox-control input { width: 17px; min-height: 17px; accent-color: var(--green); }
+.checkbox-control > span { margin: 0 !important; }
+
+.plan-tabs { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 9px; }
+.plan-tab { display: grid; gap: 4px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--paper); text-align: left; cursor: pointer; }
+.plan-tab strong { color: var(--ink); font-family: Georgia, serif; font-size: 1.05rem; }
+.plan-tab span { font-size: .68rem; text-transform: capitalize; }
+.plan-tab small { font-size: .61rem; }
+.plan-tab--active { border-color: #75a78f; background: var(--green-soft); box-shadow: inset 0 0 0 1px #75a78f; }
+
+.plan-summary { display: grid; grid-template-columns: minmax(240px, 1.5fr) repeat(4, 1fr); align-items: center; gap: 15px; padding: 21px 24px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
+.plan-summary p { margin: 0; font-size: .72rem; }
+.move-table td code { display: block; overflow: hidden; max-width: 360px; text-overflow: ellipsis; }
+.execution-panel { border-color: #cadfd1; background: linear-gradient(120deg, #fffefa, #f0f7f2); }
+.execution-panel > small { color: var(--amber); font-size: .67rem; }
+.run-list, .audit-list { display: grid; gap: 8px; }
+.run-card { display: grid; grid-template-columns: minmax(190px, 1fr) auto auto auto; align-items: center; gap: 20px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.run-card > div:first-child { display: grid; gap: 3px; }
+.run-card strong { font: 600 .72rem "Cascadia Code", Consolas, monospace; }
+.run-card small { color: var(--muted); font-size: .62rem; }
+.run-counts { display: flex; gap: 14px; color: var(--muted); font-size: .66rem; }
+
+.audit-panel { padding: 24px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper); }
+.audit-integrity { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .68rem; }
+.audit-list article { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.audit-list article > div { display: grid; gap: 3px; }
+.audit-list article strong { font-size: .72rem; text-transform: capitalize; }
+.audit-list article small { color: var(--muted); font-size: .61rem; }
+.audit-list article code { color: var(--muted); font-size: .62rem; }
+.audit-sequence { color: var(--green-bright); font-size: .65rem; font-weight: 800; }
+.root-row--write > div:last-child { flex: 0 0 auto; }
+.dialog label code { color: var(--green); }
+
+[data-theme="dark"] .notice--success { border-color: #345343; color: #a7d6ba; background: #1c3229; }
+[data-theme="dark"] .safety-indicator--live { border-color: #775b2b; color: #f2d28f; background: #3b2d17; }
+[data-theme="dark"] .safety-indicator--live p { color: #d4b77d; }
+[data-theme="dark"] .status--live,
+[data-theme="dark"] .status--write-approved { color: #f0c77b; background: #49361d; }
+[data-theme="dark"] .status--read-only,
+[data-theme="dark"] .status--verified,
+[data-theme="dark"] .status--ready { color: #a5ddb9; background: #203d30; }
+[data-theme="dark"] .status--partial { color: #ebc679; background: #44381f; }
+[data-theme="dark"] .mode-banner--read-only,
+[data-theme="dark"] .execution-panel { border-color: #365448; background: linear-gradient(120deg, #1d342a, #182a23); }
+[data-theme="dark"] .mode-banner--live { border-color: #69532b; background: linear-gradient(120deg, #352918, #2c2418); }
+[data-theme="dark"] .plan-tab--active { border-color: #4e8b6d; background: #203c31; }
+[data-theme="dark"] .safety-control-panel { border-left-color: #76c99e; }
+
+@media (max-width: 1120px) {
+  .plan-tabs { grid-template-columns: repeat(2, minmax(170px, 1fr)); }
+  .plan-summary { grid-template-columns: repeat(2, 1fr); }
+  .plan-summary > div:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 780px) {
+  .mode-banner, .safety-control-panel, .organize-builder, .execution-panel { align-items: stretch; flex-direction: column; }
+  .mode-banner > div:last-child, .safety-control-panel__state { justify-items: start; }
+  .safety-control-panel__state small { text-align: left; }
+  .organize-form, .plan-tabs, .plan-summary { grid-template-columns: 1fr; }
+  .run-card { grid-template-columns: 1fr; align-items: start; }
+  .run-counts { flex-wrap: wrap; }
+  .audit-list article { grid-template-columns: 42px 1fr; }
+  .audit-list article code { grid-column: 2; }
+}
+
+/* Immutable scan comparison */
+.comparison-panel { display: grid; grid-template-columns: minmax(260px, .9fr) minmax(430px, 1.4fr); align-items: end; gap: 24px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper); }
+.comparison-panel p { margin-bottom: 0; }
+.comparison-panel > small { grid-column: 2; color: var(--muted); font-size: .66rem; }
+.comparison-form { display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 11px; }
+.comparison-form .button { grid-column: 1 / -1; justify-self: start; }
+.comparison-results { display: grid; gap: 14px; }
+.comparison-note { color: var(--muted); font-size: .68rem; }
+.status--added { color: #286348; background: #e1f0e6; }
+.status--missing { color: #8d3c3c; background: #f8dfdc; }
+.status--metadata-changed { color: #865f1f; background: #f7edcf; }
+[data-theme="dark"] .comparison-panel { background: #192720; }
+[data-theme="dark"] .status--added { color: #a5ddb9; background: #203d30; }
+[data-theme="dark"] .status--missing { color: #f0a09c; background: #472929; }
+[data-theme="dark"] .status--metadata-changed { color: #ebc679; background: #44381f; }
+@media (max-width: 780px) { .comparison-panel, .comparison-form { grid-template-columns: 1fr; } .comparison-panel > small, .comparison-form .button { grid-column: 1; } }
+
+.receipt-panel { display: grid; gap: 14px; }
+.receipt-table td code { display: block; overflow: hidden; max-width: 280px; text-overflow: ellipsis; }
+.receipt-message { min-width: 220px; max-width: 520px; }
+.run-card .card-actions { flex-wrap: wrap; justify-content: flex-end; }

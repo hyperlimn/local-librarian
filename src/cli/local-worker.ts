@@ -18,6 +18,13 @@ import {
   ReadOnlyRootPathResolver,
 } from "../safety/index.js";
 import {
+  ORGANIZATION_EXECUTE_JOB_DEFINITION,
+  ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+  OrganizationExecutionJobHandler,
+  OrganizationRollbackJobHandler,
+  SqliteOrganizationStore,
+} from "../organization/index.js";
+import {
   INVENTORY_SCAN_JOB_DEFINITION,
   InventoryRootGuard,
   InventoryScanJobHandler,
@@ -32,7 +39,12 @@ async function main(): Promise<void> {
   const paths = localStatePaths(stateDirectory);
   const queue = new SqlitePersistentJobQueue({
     databasePath: paths.jobsDatabase,
-    definitions: [DIAGNOSTIC_COUNT_JOB_DEFINITION, INVENTORY_SCAN_JOB_DEFINITION],
+    definitions: [
+      DIAGNOSTIC_COUNT_JOB_DEFINITION,
+      INVENTORY_SCAN_JOB_DEFINITION,
+      ORGANIZATION_EXECUTE_JOB_DEFINITION,
+      ORGANIZATION_ROLLBACK_JOB_DEFINITION,
+    ],
   });
   const catalog = new SqliteInventoryCatalog({
     databasePath: paths.inventoryDatabase,
@@ -41,11 +53,15 @@ async function main(): Promise<void> {
   const boundary = new PathBoundary(
     process.platform === "win32" ? "win32" : "posix",
   );
+  const rootResolver = new ReadOnlyRootPathResolver(canonicalizer, boundary);
+  const organization = new SqliteOrganizationStore({
+    databasePath: paths.organizationDatabase,
+  });
   const rootGuard = new InventoryRootGuard(
     new JsonlRootEnrollmentStore(paths.enrollmentsJournal),
     canonicalizer,
     new SystemVolumeIdentityProvider(),
-    new ReadOnlyRootPathResolver(canonicalizer, boundary),
+    rootResolver,
   );
   const worker = new PersistentLocalWorker({
     id: `local-worker-${process.pid}` as WorkerId,
@@ -53,6 +69,20 @@ async function main(): Promise<void> {
     handlers: [
       new DiagnosticCountJobHandler(),
       new InventoryScanJobHandler(rootGuard, catalog),
+      new OrganizationExecutionJobHandler(
+        rootGuard,
+        organization,
+        canonicalizer,
+        rootResolver,
+        boundary,
+      ),
+      new OrganizationRollbackJobHandler(
+        rootGuard,
+        organization,
+        canonicalizer,
+        rootResolver,
+        boundary,
+      ),
     ],
   });
   const heartbeat = new WorkerHeartbeat(
@@ -75,6 +105,7 @@ async function main(): Promise<void> {
     }
   } finally {
     await heartbeat.stop();
+    organization.close();
     catalog.close();
     queue.close();
   }

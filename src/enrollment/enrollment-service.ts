@@ -58,7 +58,7 @@ export class RootEnrollmentService {
             "A stable volume GUID was unavailable; recognition after remount is best-effort.",
           ]
         : []),
-      "Enrollment is read-only. Write access requires a separate future approval.",
+      "Write access is disabled initially and requires a separate explicit approval.",
     ];
     const base = {
       proposalId,
@@ -168,6 +168,36 @@ export class RootEnrollmentService {
 
   public get(id: EnrolledRootId): Promise<EnrolledRoot | undefined> {
     return this.store.get(id);
+  }
+
+  /** Separately approves or revokes write access without changing root identity. */
+  public async setLibraryWriteAccess(
+    id: LibraryRootId,
+    allowWrites: boolean,
+    approvedBy: string,
+  ): Promise<ApprovedLibraryRoot> {
+    if (approvedBy.trim().length === 0) {
+      throw new Error("An approving actor is required.");
+    }
+    const existing = await this.store.get(id);
+    if (existing === undefined || !("controlDirectory" in existing.policy)) {
+      throw new Error("The library root is not enrolled.");
+    }
+    const library = existing as LibraryRoot;
+    if (library.approval.status !== "approved") {
+      throw new Error("Write access cannot be changed for a revoked library root.");
+    }
+    const updated: ApprovedLibraryRoot = {
+      ...library,
+      approval: {
+        status: "approved",
+        approvedAt: this.now(),
+        approvedBy: approvedBy.trim(),
+      },
+      policy: { ...library.policy, allowWrites },
+    };
+    await this.store.saveApproved(updated);
+    return updated;
   }
 
   public async revoke(

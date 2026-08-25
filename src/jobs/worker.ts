@@ -58,4 +58,4 @@ export interface WorkerFactory {
   create(handlers: readonly JobHandler[]): LocalWorker;
 }
 
-export const LOCAL_WORKER_IMPLEMENTATION_STATUS = "diagnostic-and-inventory" as const;
+export const LOCAL_WORKER_IMPLEMENTATION_STATUS = "turnkey-v1" as const;

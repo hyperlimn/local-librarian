@@ -2,24 +2,34 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPage } from "./pages/InventoryPage";
+import { OrganizePage } from "./pages/OrganizePage";
 import { JobsPage } from "./pages/JobsPage";
 import { LibrariesPage } from "./pages/LibrariesPage";
 import { SafetyPage } from "./pages/SafetyPage";
 import { ScansPage } from "./pages/ScansPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useTheme } from "./useTheme";
+import { api } from "./api";
+import type { SystemState } from "./types";
 
-const pages = ["dashboard", "libraries", "inventory", "jobs", "scans", "safety"] as const;
+const pages = ["dashboard", "libraries", "inventory", "organize", "jobs", "scans", "safety"] as const;
 type Page = typeof pages[number];
 
 export function App() {
   const [page, setPage] = useState<Page>(() => pageFromHash());
   const [menuOpen, setMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const [system, setSystem] = useState<SystemState>();
   useEffect(() => {
     const onHash = () => { setPage(pageFromHash()); setMenuOpen(false); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => {
+    const load = () => void api<SystemState>("/api/system").then(setSystem).catch(() => undefined);
+    load();
+    const timer = window.setInterval(load, 5_000);
+    return () => window.clearInterval(timer);
   }, []);
   function navigate(next: string) {
     if (!isPage(next)) return;
@@ -38,12 +48,13 @@ export function App() {
           <NavItem page="inventory" current={page} icon="list" onSelect={navigate}>Inventory</NavItem>
           <NavItem page="jobs" current={page} icon="pulse" onSelect={navigate}>Jobs</NavItem>
           <NavItem page="scans" current={page} icon="history" onSelect={navigate}>Scans</NavItem>
+          <NavItem page="organize" current={page} icon="organize" onSelect={navigate}>Organize</NavItem>
         </nav>
         <nav className="sidebar__lower" aria-label="System navigation">
           <NavItem page="safety" current={page} icon="shield" onSelect={navigate}>Safety & diagnostics</NavItem>
         </nav>
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
-        <div className="sidebar-safety"><span className="sidebar-safety__dot" /><div><strong>Read-only mode</strong><small>File mutation disabled</small></div></div>
+        <div className={`sidebar-safety ${system?.mutationMode.mode === "live" ? "sidebar-safety--live" : ""}`}><span className="sidebar-safety__dot" /><div><strong>{system?.mutationMode.mode === "live" ? "Live mutation mode" : "Read-only testing"}</strong><small>{system?.mutationMode.mode === "live" ? "Per-library approval required" : "File mutation disabled"}</small></div></div>
       </aside>
       {menuOpen && <button className="menu-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
       <main className="main-content">
@@ -53,6 +64,7 @@ export function App() {
         {page === "jobs" && <JobsPage />}
         {page === "scans" && <ScansPage />}
         {page === "safety" && <SafetyPage />}
+        {page === "organize" && <OrganizePage />}
       </main>
     </div>
   );
@@ -72,7 +84,7 @@ function NavItem({ page, current, icon, onSelect, children }: {
   return <button className={`nav-item ${page === current ? "nav-item--active" : ""}`} onClick={() => onSelect(page)}><Icon name={icon} />{children}</button>;
 }
 
-type IconName = "grid" | "library" | "list" | "pulse" | "history" | "shield";
+type IconName = "grid" | "library" | "list" | "organize" | "pulse" | "history" | "shield";
 function Icon({ name }: { readonly name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
@@ -81,6 +93,7 @@ function Icon({ name }: { readonly name: IconName }) {
     pulse: <path d="M3 12h4l2-7 4 14 2-7h6" />,
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-5" /></>,
+    organize: <><path d="M4 6h16M4 12h16M4 18h16" /><path d="m7 3 2 3-2 3M13 9l2 3-2 3M7 15l2 3-2 3" /></>,
   };
   return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

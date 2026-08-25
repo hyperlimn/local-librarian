@@ -1,14 +1,15 @@
 {
   "name": "local-librarian",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Safety-first, MCP-oriented architecture for organizing local file libraries.",
+  "description": "A local-first, safety-gated application for inventorying and organizing messy file libraries.",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",
+    "start": "npm run librarian",
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "vite build --config web/vite.config.ts",
     "check": "npm run check:server && npm run check:web",
@@ -20,6 +21,7 @@
     "roots:enroll": "node dist/cli/root-enroll.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify": "npm run check && npm test && npm run build",
     "librarian": "npm run build && node dist/web/main.js",
     "web": "node dist/web/main.js",
     "worker:diagnostic": "node dist/cli/diagnostic-worker.js",

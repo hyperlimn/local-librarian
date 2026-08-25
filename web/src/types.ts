@@ -1,7 +1,7 @@
 export type Status =
   | "approved" | "revoked" | "queued" | "running" | "paused"
   | "completed" | "failed" | "cancelled" | "offline" | "starting"
-  | "stale" | "observed" | "skipped" | "error";
+  | "stale" | "observed" | "skipped" | "error" | "partial" | "ready" | "archived";
 
 export interface Counts {
   recordsObserved: number;
@@ -131,5 +131,134 @@ export interface Proposal {
   warnings: string[];
   approvalRequired: true;
   proposedAt: string;
+}
+export interface SystemState {
+  version: string;
+  binding: "loopback-only";
+  safetyStatus: "enforced";
+  filesystemExecution: "simulation-only" | "live";
+  fileMutation: "DISABLED" | "ENABLED";
+  mutationMode: {
+    mode: "read-only" | "live";
+    updatedAt: string;
+    updatedBy: string;
+  };
+  capabilities: {
+    inventory: true;
+    planning: true;
+    simulation: true;
+    liveRelocation: boolean;
+    rollback: true;
+  };
+  databasePaths: Record<string, string>;
+}
+
+export interface OrganizationPlan {
+  id: string;
+  rootId: string;
+  rootIdentityKey: string;
+  scanId: string;
+  status: "ready" | "archived";
+  options: {
+    strategy: "category" | "category-and-year" | "year-and-month";
+    scope: "top-level" | "all-files";
+    targetDirectory: string;
+    collisionPolicy: "skip" | "rename-with-suffix";
+    includeHidden: boolean;
+    maximumOperations: number;
+  };
+  counts: {
+    scannedFiles: number;
+    eligibleFiles: number;
+    plannedMoves: number;
+    representedBytes: number;
+    preservedByScope: number;
+    alreadyOrganized: number;
+    hiddenExcluded: number;
+    conflictsSkipped: number;
+    limitedOut: number;
+    byCategory: Record<string, number>;
+  };
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface OrganizationOperation {
+  id: string;
+  planId: string;
+  ordinal: number;
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+  category: string;
+  rationale: string;
+  expected: {
+    byteLength: number;
+    modifiedAt?: string;
+    deviceId?: string;
+    filesystemRecordId?: string;
+  };
+}
+
+export interface OrganizationRun {
+  id: string;
+  planId: string;
+  sourceRunId?: string;
+  jobId?: string;
+  mode: "simulation" | "live" | "rollback-simulation" | "rollback-live";
+  status: Status;
+  approvedBy: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: { code: string; message: string };
+  counts: {
+    total: number;
+    processed: number;
+    succeeded: number;
+    skipped: number;
+    failed: number;
+  };
+}
+
+export interface OrganizationRunItem {
+  runId: string;
+  operationId: string;
+  outcome: string;
+  message: string;
+  completedAt: string;
+  operation: OrganizationOperation;
+}
+
+export interface OrganizationAuditEvent {
+  sequence: number;
+  id: string;
+  event: string;
+  occurredAt: string;
+  actor: string;
+  correlationId: string;
+  previousHash?: string;
+  entryHash: string;
+  details: Record<string, unknown>;
+}
+
+export interface AuditIntegrity {
+  valid: boolean;
+  entriesChecked: number;
+  firstInvalidSequence?: number;
+  reason?: string;
+}
+
+export interface ReconciliationDelta {
+  relativePath: string;
+  kind: "added" | "missing" | "metadata-changed";
+  changedFields?: string[];
+}
+
+export interface ReconciliationReport {
+  rootId: string;
+  baselineScanId: string;
+  comparisonScanId: string;
+  deltas: ReconciliationDelta[];
+  generatedAt: string;
 }
 

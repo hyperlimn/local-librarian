@@ -7,6 +7,14 @@ async function main(): Promise<void> {
   const displayHost = address.host === "127.0.0.1" ? "localhost" : address.host;
   process.stdout.write(`Local Librarian is running at http://${displayHost}:${address.port}\n`);
   process.stdout.write(`Application state: ${runtime.stateDirectory}\n`);
+  try {
+    const worker = await runtime.startWorker();
+    process.stdout.write(`Background worker: ${worker.status}${worker.pid === undefined ? "" : ` (PID ${worker.pid})`}\n`);
+  } catch (error) {
+    process.stderr.write(
+      `Background worker did not start; it can be retried from the WebUI: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
 
   let closing = false;
   const close = (): void => {
