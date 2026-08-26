@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   InventoryRecordId,
   InventoryScanId,
+  IngestSourceId,
   JobId,
   LibraryRootId,
 } from "../domain/index.js";
@@ -34,6 +35,22 @@ import type { LocalStatePaths } from "../cli/local-state.js";
 import { ReconciliationService } from "../reconciliation/index.js";
 import type { DiscoveredVolume, DriveDiscovery } from "./drive-discovery.js";
 import type { WorkerManager } from "./worker-process-manager.js";
+import {
+  type AnalysisService,
+  type DuplicateGroupQuery,
+  type EnrichedInventoryQuery,
+  type NeedsReviewQuery,
+  type ReconciliationDeltaKind,
+  type ResourceSettings,
+  type ScalableReconciliationService,
+  type SqliteIntelligenceStore,
+} from "../intelligence/index.js";
+import type {
+  CreateCrossVolumePlanInput,
+  CreateIngestPlanInput,
+  SqliteTransferStore,
+  TransferService,
+} from "../transfer/index.js";
 
 export interface WebJobStore extends JobClient {
   list(query?: JobListQuery): Promise<JobRecordPage>;
@@ -45,6 +62,14 @@ export interface EnrollmentProposalInput {
   readonly displayName: string;
 }
 
+export interface LocalLibrarianV2Services {
+  readonly intelligence: SqliteIntelligenceStore;
+  readonly analysis: AnalysisService;
+  readonly reconciliation: ScalableReconciliationService;
+  readonly transfers: SqliteTransferStore;
+  readonly transferService: TransferService;
+}
+
 export interface LibraryView {
   readonly root: Awaited<ReturnType<RootEnrollmentStore["list"]>>[number];
   readonly summary: Awaited<ReturnType<InventoryCatalog["summary"]>>;
@@ -53,6 +78,11 @@ export interface LibraryView {
 export class LocalLibrarianApplication {
   readonly #inventory: InventoryTools;
   readonly #reconciliation: ReconciliationService;
+  readonly #intelligence: SqliteIntelligenceStore | undefined;
+  readonly #analysis: AnalysisService | undefined;
+  readonly #scalableReconciliation: ScalableReconciliationService | undefined;
+  readonly #transfers: SqliteTransferStore | undefined;
+  readonly #transferService: TransferService | undefined;
 
   public constructor(
     private readonly enrollmentService: RootEnrollmentService,
@@ -63,10 +93,16 @@ export class LocalLibrarianApplication {
     private readonly drives: DriveDiscovery,
     private readonly worker: WorkerManager,
     private readonly paths: LocalStatePaths,
-    private readonly version = "1.0.0",
+    private readonly version = "2.0.0",
+    v2?: LocalLibrarianV2Services,
   ) {
     this.#inventory = new InventoryTools(jobs, enrollments, catalog);
     this.#reconciliation = new ReconciliationService(catalog);
+    this.#intelligence = v2?.intelligence;
+    this.#analysis = v2?.analysis;
+    this.#scalableReconciliation = v2?.reconciliation;
+    this.#transfers = v2?.transfers;
+    this.#transferService = v2?.transferService;
   }
 
   public async dashboard(): Promise<{
@@ -77,14 +113,15 @@ export class LocalLibrarianApplication {
     readonly recentPlans: Awaited<ReturnType<OrganizationService["listPlans"]>>["items"];
     readonly recentRuns: Awaited<ReturnType<OrganizationService["listRuns"]>>["items"];
     readonly worker: Awaited<ReturnType<WorkerManager["status"]>>;
+    readonly intelligence: Awaited<ReturnType<SqliteIntelligenceStore["summary"]>>;
     readonly attention: readonly {
-      readonly kind: "job" | "scan" | "organization-run";
+      readonly kind: "job" | "scan" | "organization-run" | "needs-review";
       readonly id: string;
       readonly message: string;
     }[];
     readonly system: Awaited<ReturnType<LocalLibrarianApplication["system"]>>;
   }> {
-    const [libraries, jobPage, scanPage, worker, planPage, runPage, system] = await Promise.all([
+    const [libraries, jobPage, scanPage, worker, planPage, runPage, system, intelligenceBase, quarantineCount] = await Promise.all([
       this.libraries(true),
       this.jobs.list({ limit: 100 }),
       this.catalog.listScans({ limit: 20 }),
@@ -92,7 +129,18 @@ export class LocalLibrarianApplication {
       this.organization.listPlans(undefined, 12),
       this.organization.listRuns(undefined, 12),
       this.system(),
+      this.#intelligence?.summary() ?? Promise.resolve({
+        filesAnalyzed: 0,
+        filesAwaitingAnalysis: 0,
+        candidateDuplicateGroups: 0,
+        exactDuplicateGroups: 0,
+        reclaimableDuplicateBytes: 0,
+        needsReview: 0,
+        quarantineCount: 0,
+      }),
+      this.#transfers?.quarantineCount() ?? Promise.resolve(0),
     ]);
+    const intelligence = { ...intelligenceBase, quarantineCount };
     const activeStatuses = new Set(["queued", "running", "paused"]);
     const activeJobs = jobPage.items.filter((job) => activeStatuses.has(job.status));
     const attention = [
@@ -117,6 +165,13 @@ export class LocalLibrarianApplication {
           id: run.id,
           message: run.error?.message ?? `Organization run finished ${run.status}.`,
         })),
+      ...(intelligence.needsReview === 0
+        ? []
+        : [{
+            kind: "needs-review" as const,
+            id: "needs-review",
+            message: `${intelligence.needsReview.toLocaleString()} items need a decision.`,
+          }]),
     ];
     return {
       libraries,
@@ -124,6 +179,7 @@ export class LocalLibrarianApplication {
       recentJobs: jobPage.items.slice(0, 12),
       recentScans: scanPage.items,
       worker,
+      intelligence,
       recentPlans: planPage.items,
       recentRuns: runPage.items,
       attention,
@@ -144,6 +200,15 @@ export class LocalLibrarianApplication {
       readonly simulation: true;
       readonly liveRelocation: boolean;
       readonly rollback: true;
+      readonly contentIdentity: boolean;
+      readonly duplicates: boolean;
+      readonly metadataAnalysis: boolean;
+      readonly relationships: boolean;
+      readonly needsReview: boolean;
+      readonly scalableReconciliation: boolean;
+      readonly ingest: boolean;
+      readonly quarantine: boolean;
+      readonly crossVolumeOrganization: boolean;
     };
     readonly databasePaths: {
       readonly jobs: string;
@@ -151,6 +216,7 @@ export class LocalLibrarianApplication {
       readonly organization: string;
       readonly enrollments: string;
       readonly workerStatus: string;
+      readonly transfers: string;
     };
   }> {
     const mutationMode = await this.organization.mutationMode();
@@ -168,6 +234,15 @@ export class LocalLibrarianApplication {
         simulation: true,
         liveRelocation: live,
         rollback: true,
+        contentIdentity: this.#intelligence !== undefined,
+        duplicates: this.#intelligence !== undefined,
+        metadataAnalysis: this.#analysis !== undefined,
+        relationships: this.#analysis !== undefined,
+        needsReview: this.#intelligence !== undefined,
+        scalableReconciliation: this.#scalableReconciliation !== undefined,
+        ingest: this.#transferService !== undefined,
+        quarantine: this.#transferService !== undefined,
+        crossVolumeOrganization: this.#transferService !== undefined,
       },
       databasePaths: {
         jobs: this.paths.jobsDatabase,
@@ -175,6 +250,7 @@ export class LocalLibrarianApplication {
         organization: this.paths.organizationDatabase,
         enrollments: this.paths.enrollmentsJournal,
         workerStatus: this.paths.workerStatus,
+        transfers: this.paths.transfersDatabase,
       },
     };
   }
@@ -221,6 +297,21 @@ export class LocalLibrarianApplication {
     });
   }
 
+  public proposeIngestSource(input: EnrollmentProposalInput & {
+    readonly ingestSourceKind: "folder" | "drive" | "sd-card" | "drop-directory";
+  }): Promise<RootEnrollmentProposal> {
+    return this.enrollmentService.propose({
+      role: "ingest-source",
+      path: input.path,
+      displayName: input.displayName,
+      ingestSourceKind: input.ingestSourceKind,
+    });
+  }
+
+  public async ingestSources(includeRevoked = true) {
+    return this.enrollments.list({ role: "ingest-source", includeRevoked });
+  }
+
   public approveEnrollment(proposalId: string, approvedBy: string) {
     return this.enrollmentService.approve(proposalId, approvedBy);
   }
@@ -236,6 +327,20 @@ export class LocalLibrarianApplication {
     return this.enrollmentService.setLibraryWriteAccess(
       rootId,
       allowWrites,
+      approvedBy,
+    );
+  }
+
+  public setIngestSourceRetirementAccess(
+    rootId: IngestSourceId,
+    allowWrites: boolean,
+    allowSourceRetirement: boolean,
+    approvedBy: string,
+  ) {
+    return this.enrollmentService.setIngestSourceRetirementAccess(
+      rootId,
+      allowWrites,
+      allowSourceRetirement,
       approvedBy,
     );
   }
@@ -312,6 +417,83 @@ export class LocalLibrarianApplication {
     return this.#inventory.get(recordId);
   }
 
+  public enrichedInventory(rootId: LibraryRootId, query?: EnrichedInventoryQuery) {
+    return this.requireIntelligence().enrichedInventory(rootId, query);
+  }
+
+  public analysisStatus(rootId: LibraryRootId, scanId?: string) {
+    const analysis = this.#analysis;
+    if (analysis === undefined) throw new Error("Content analysis is not available in this runtime.");
+    return analysis.status(rootId, scanId);
+  }
+
+  public startAnalysis(input: {
+    readonly rootId: LibraryRootId;
+    readonly requestedBy: string;
+    readonly stages?: readonly import("../intelligence/index.js").AnalysisStageName[];
+    readonly hashScope?: "duplicate-candidates" | "all";
+  }) {
+    const analysis = this.#analysis;
+    if (analysis === undefined) throw new Error("Content analysis is not available in this runtime.");
+    return analysis.start(input);
+  }
+
+  public duplicates(query?: DuplicateGroupQuery) {
+    return this.requireIntelligence().duplicateGroups(query);
+  }
+
+  public duplicateGroup(id: string) {
+    return this.requireIntelligence().duplicateGroup(id);
+  }
+
+  public duplicateMembers(id: string, limit?: number, cursor?: string) {
+    return this.requireIntelligence().duplicateMembers(id, limit, cursor);
+  }
+
+  public decideDuplicateGroup(
+    id: string,
+    keeperRecordIds: readonly string[],
+    keepEverything: boolean,
+  ) {
+    return this.requireIntelligence().decideDuplicateGroup(
+      id,
+      keeperRecordIds,
+      keepEverything,
+      new Date().toISOString(),
+    );
+  }
+
+  public needsReview(query?: NeedsReviewQuery) {
+    return this.requireIntelligence().needsReview(query);
+  }
+
+  public resolveNeedsReview(
+    id: string,
+    status: "resolved" | "dismissed",
+    resolution: import("../domain/index.js").JsonObject,
+    rememberExtensionRule: boolean,
+  ) {
+    return this.requireIntelligence().resolveNeedsReview(
+      id,
+      status,
+      resolution,
+      new Date().toISOString(),
+      rememberExtensionRule,
+    );
+  }
+
+  public semanticGroups(rootId: LibraryRootId, scanId?: string) {
+    return this.requireIntelligence().semanticGroups(rootId, scanId);
+  }
+
+  public resourceSettings() {
+    return this.requireIntelligence().settings();
+  }
+
+  public saveResourceSettings(settings: ResourceSettings) {
+    return this.requireIntelligence().saveSettings(settings, new Date().toISOString());
+  }
+
   public scans(query?: InventoryScanListQuery) {
     return this.catalog.listScans(query);
   }
@@ -325,11 +507,83 @@ export class LocalLibrarianApplication {
     baselineScanId: InventoryScanId,
     comparisonScanId: InventoryScanId,
   ) {
+    if (this.#scalableReconciliation !== undefined) {
+      return this.#scalableReconciliation.compare({
+        rootId,
+        baselineScanId,
+        comparisonScanId,
+        requestedBy: "webui",
+      });
+    }
     return this.#reconciliation.compare({
       rootId,
       baselineScanId,
       comparisonScanId,
     });
+  }
+
+  public reconciliations(rootId?: string, limit?: number, cursor?: string) {
+    const service = this.#scalableReconciliation;
+    if (service === undefined) throw new Error("Scalable reconciliation is not available in this runtime.");
+    return service.list(rootId, limit, cursor);
+  }
+
+  public reconciliation(id: string) {
+    const service = this.#scalableReconciliation;
+    if (service === undefined) throw new Error("Scalable reconciliation is not available in this runtime.");
+    return service.get(id);
+  }
+
+  public reconciliationDeltas(
+    id: string,
+    input?: {
+      readonly kind?: ReconciliationDeltaKind;
+      readonly search?: string;
+      readonly limit?: number;
+      readonly cursor?: string;
+    },
+  ) {
+    const service = this.#scalableReconciliation;
+    if (service === undefined) throw new Error("Scalable reconciliation is not available in this runtime.");
+    return service.deltas(id, input);
+  }
+
+  public createIngestPlan(input: CreateIngestPlanInput) {
+    return this.requireTransferService().createIngestPlan(input);
+  }
+
+  public createCrossVolumePlan(input: CreateCrossVolumePlanInput) {
+    return this.requireTransferService().createCrossVolumePlan(input);
+  }
+
+  public createDuplicateConsolidation(groupId: string, requestedBy: string) {
+    return this.requireTransferService().createDuplicateConsolidation(groupId, requestedBy);
+  }
+
+  public transferPlans(query?: Parameters<TransferService["plans"]>[0]) {
+    return this.requireTransferService().plans(query);
+  }
+
+  public transferPlan(id: string) { return this.requireTransferService().plan(id); }
+  public transferItems(planId: string, query?: Parameters<TransferService["items"]>[1]) {
+    return this.requireTransferService().items(planId, query);
+  }
+  public resolveTransferItem(planId: string, itemId: string, destinationRelativePath: string) {
+    return this.requireTransferService().resolveItem(planId, itemId, destinationRelativePath);
+  }
+  public approveTransferPlan(planId: string, approvedBy: string, confirmation: string) {
+    return this.requireTransferService().approve(planId, approvedBy, confirmation);
+  }
+  public transferReceipt(planId: string) { return this.requireTransferService().receipt(planId); }
+  public quarantine(query?: Parameters<TransferService["quarantine"]>[0]) {
+    return this.requireTransferService().quarantine(query);
+  }
+  public quarantineItem(id: string) { return this.requireTransferService().quarantineItem(id); }
+  public restoreQuarantine(id: string, approvedBy: string, confirmation: string) {
+    return this.requireTransferService().restore(id, approvedBy, confirmation);
+  }
+  public transferAudit(limit?: number, afterSequence?: number) {
+    return this.requireTransferService().audit(limit, afterSequence);
   }
 
   public jobList(query?: JobListQuery) {
@@ -367,6 +621,20 @@ export class LocalLibrarianApplication {
   public startWorker() {
     return this.worker.start();
   }
+
+  private requireIntelligence(): SqliteIntelligenceStore {
+    if (this.#intelligence === undefined) {
+      throw new Error("Content intelligence is not available in this runtime.");
+    }
+    return this.#intelligence;
+  }
+
+  private requireTransferService(): TransferService {
+    if (this.#transferService === undefined) {
+      throw new Error("Verified transfer and quarantine services are not available in this runtime.");
+    }
+    return this.#transferService;
+  }
 }
 
 function sameMount(left: string, right: string): boolean {
@@ -374,4 +642,3 @@ function sameMount(left: string, right: string): boolean {
     value.replaceAll("/", "\\").replace(/\\+$/u, "").toLocaleLowerCase("en-US");
   return normalize(left) === normalize(right);
 }
-

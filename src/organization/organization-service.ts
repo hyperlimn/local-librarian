@@ -84,9 +84,9 @@ export class OrganizationService {
     if (updatedBy.trim().length === 0) throw new Error("A safety actor is required.");
     if (mode === "live" && confirmation !== "ENABLE LIVE FILE MUTATION") {
       throw new Error("Type ENABLE LIVE FILE MUTATION to enable live mode.");
+    }
     if (mode === "read-only" && confirmation !== "DISABLE") {
       throw new Error("Type DISABLE to return to read-only mode.");
-    }
     }
     return this.store.setMutationMode(mode, updatedBy.trim());
   }
@@ -102,6 +102,7 @@ export class OrganizationService {
   public async startRun(input: StartOrganizationRunInput): Promise<OrganizationRun> {
     const plan = await this.store.getPlan(input.planId);
     if (plan === undefined) throw new Error("The organization plan does not exist.");
+    await this.planner.assertPlanFresh(plan);
     this.assertActor(input.approvedBy);
     if (input.mode === "simulation") {
       if (input.confirmation !== "SIMULATE") {

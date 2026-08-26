@@ -7,7 +7,7 @@ import { SafetyIndicator } from "../components/SafetyIndicator";
 import { ScanProgress } from "../components/ScanProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatBytes, formatDate, shortId } from "../format";
-import type { Job, LibraryView, OrganizationPlan, OrganizationRun, Scan, SystemState, WorkerStatus } from "../types";
+import type { IntelligenceSummary, Job, LibraryView, OrganizationPlan, OrganizationRun, Scan, SystemState, WorkerStatus } from "../types";
 
 interface DashboardData {
   libraries: LibraryView[];
@@ -17,6 +17,7 @@ interface DashboardData {
   recentPlans: OrganizationPlan[];
   recentRuns: OrganizationRun[];
   worker: WorkerStatus;
+  intelligence: IntelligenceSummary;
   attention: Array<{ kind: string; id: string; message: string }>;
   system: SystemState;
 }
@@ -48,24 +49,39 @@ export function DashboardPage({ navigate }: { readonly navigate: (page: string) 
   const latestJob = latestRunning === undefined
     ? undefined
     : data.activeJobs.find((job) => job.id === latestRunning.jobId);
+  const approvedLibraries = data.libraries.filter((item) => item.root.approval.status === "approved");
+  const latestSnapshots = approvedLibraries
+    .map((item) => item.summary.latestScan)
+    .filter((scan): scan is Scan => scan?.status === "completed");
+  const indexedFiles = latestSnapshots.reduce((total, scan) => total + scan.counts.filesDiscovered, 0);
+  const storageRepresented = latestSnapshots.reduce((total, scan) => total + scan.counts.bytesRepresented, 0);
+  const firstRunIncomplete = approvedLibraries.length === 0 || latestSnapshots.length === 0 || data.intelligence.filesAnalyzed === 0;
   return (
     <div className="page-stack">
       <section className="hero-panel">
         <div>
           <span className="eyebrow">Local overview</span>
           <h1>Your libraries, quietly organized.</h1>
-          <p>Inventory messy storage, preview a clear organization policy, test it read-only, then apply and undo reviewed moves.</p>
+          <p>Inventory messy storage quickly, progressively understand its contents and relationships, review uncertainty, then execute approved changes through the safety-gated physical layer.</p>
         </div>
         <SafetyIndicator compact mode={data.system.mutationMode.mode} />
       </section>
 
       {error && <div className="notice notice--error">{error}</div>}
-      <section className="stat-strip">
-        <Stat value={data.libraries.filter((item) => item.root.approval.status === "approved").length} label="Approved libraries" />
-        <Stat value={data.activeJobs.length} label="Active jobs" />
-        <Stat value={data.recentPlans.length} label="Organization plans" />
+      {firstRunIncomplete && <FirstRunGuide libraries={approvedLibraries.length} scans={latestSnapshots.length} analyzed={data.intelligence.filesAnalyzed} plans={data.recentPlans.length} mode={data.system.mutationMode.mode} navigate={navigate} />}
+      <section className="stat-strip stat-strip--intelligence">
+        <Stat value={approvedLibraries.length} label="Libraries" onClick={() => navigate("libraries")} />
+        <Stat value={indexedFiles} label="Indexed files" onClick={() => navigate("inventory")} />
+        <Stat value={formatBytes(storageRepresented)} label="Storage represented" onClick={() => navigate("inventory")} />
+        <Stat value={data.intelligence.filesAnalyzed} label="Files analyzed" onClick={() => navigate("analyze")} />
+        <Stat value={data.intelligence.filesAwaitingAnalysis} label="Awaiting analysis" onClick={() => navigate("analyze")} />
+        <Stat value={data.intelligence.exactDuplicateGroups} label="Exact duplicate groups" onClick={() => navigate("duplicates")} />
+        <Stat value={formatBytes(data.intelligence.reclaimableDuplicateBytes)} label="Reclaimable duplicate space" onClick={() => navigate("duplicates")} />
+        <Stat value={data.intelligence.needsReview} label="Needs Review" onClick={() => navigate("needs-review")} />
+        <Stat value={data.intelligence.quarantineCount} label="Quarantined copies" onClick={() => navigate("quarantine")} />
+        <Stat value={data.activeJobs.length} label="Active jobs" onClick={() => navigate("jobs")} />
         <div className="stat-card stat-card--worker">
-          <span>Worker</span><StatusBadge status={data.worker.status} />
+          <span>Worker health</span><StatusBadge status={data.worker.status} />
           {(data.worker.status === "offline" || data.worker.status === "stale") && <button className="button button--mini" onClick={() => void startWorker()}>Start worker</button>}
         </div>
       </section>
@@ -120,8 +136,30 @@ export function DashboardPage({ navigate }: { readonly navigate: (page: string) 
   );
 }
 
-function Stat({ value, label }: { readonly value: number; readonly label: string }) {
-  return <div className="stat-card"><strong>{value.toLocaleString()}</strong><span>{label}</span></div>;
+function Stat({ value, label, onClick }: { readonly value: number | string; readonly label: string; readonly onClick: () => void }) {
+  const display = typeof value === "number" ? value.toLocaleString() : value;
+  return <button className="stat-card stat-card--link" onClick={onClick}><strong>{display}</strong><span>{label}</span><small>Open →</small></button>;
+}
+
+function FirstRunGuide({ libraries, scans, analyzed, plans, mode, navigate }: {
+  readonly libraries: number;
+  readonly scans: number;
+  readonly analyzed: number;
+  readonly plans: number;
+  readonly mode: "read-only" | "live";
+  readonly navigate: (page: string) => void;
+}) {
+  const steps = [
+    { label: "Local and private", copy: "Catalogs, hashes, metadata, and optional model inference stay on this computer.", done: true },
+    { label: "Safety mode", copy: mode === "read-only" ? "READ ONLY is active; planning and simulation cannot mutate files." : "FULL ORGANIZATION is active, with a separate write gate for every library.", done: true, page: "safety" },
+    { label: "Select a library", copy: "Explicitly enroll the folder or mounted volume you want Local Librarian to know.", done: libraries > 0, page: "libraries" },
+    { label: "Inventory it", copy: "Capture a fast metadata-only snapshot as a durable background job.", done: scans > 0, page: "inventory" },
+    { label: "Analyze progressively", copy: "Find duplicate candidates, selectively hash, extract metadata, and detect relationships.", done: analyzed > 0, page: "analyze" },
+    { label: "Review discoveries", copy: "Inspect duplicates and resolve uncertain classifications before planning.", done: analyzed > 0, page: "duplicates" },
+    { label: "Propose organization", copy: "Build and inspect an explainable Conservative, Balanced, or Deep plan.", done: plans > 0, page: "organize" },
+    { label: "Test before applying", copy: "Simulate the reviewed plan; enabling writes remains a deliberate separate decision.", done: false, page: "organize" },
+  ] as const;
+  return <section className="first-run-panel"><div className="section-heading"><div><span className="eyebrow">First-run guide</span><h2>From messy storage to understood library</h2><p>No cloud account, upload, or opaque background service is required.</p></div></div><ol>{steps.map((step, index) => <li className={step.done ? "first-run-step first-run-step--done" : "first-run-step"} key={step.label}><span>{step.done ? "✓" : index + 1}</span><div><strong>{step.label}</strong><p>{step.copy}</p></div>{"page" in step && <button className="button button--text button--mini" onClick={() => navigate(step.page)}>Open</button>}</li>)}</ol></section>;
 }
 
 function SectionHeader({ title, action, onAction }: { readonly title: string; readonly action?: string; readonly onAction?: () => void }) {

@@ -4,6 +4,7 @@ export * from "./domain/index.js";
 export * from "./enrollment/index.js";
 export * from "./executor/index.js";
 export * from "./ingest/index.js";
+export * from "./transfer/index.js";
 export * from "./journal/index.js";
 export * from "./jobs/index.js";
 export * from "./mcp/index.js";

@@ -203,7 +203,8 @@ export class SqlitePersistentJobQueue
 
     this.#database.exec("PRAGMA journal_mode = WAL");
     this.#database.exec("PRAGMA synchronous = FULL");
-    this.#database.exec("PRAGMA busy_timeout = 5000");
+    this.#database.exec("PRAGMA busy_timeout = 15000");
+    this.#database.exec("PRAGMA wal_autocheckpoint = 1000");
     this.#database.exec(RUNTIME_SCHEMA);
   }
 

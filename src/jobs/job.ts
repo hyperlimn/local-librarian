@@ -21,11 +21,15 @@ export type KnownJobKind =
   | "content.hash"
   | "duplicates.detect"
   | "media.analyze"
+  | "relationships.analyze"
+  | "scans.reconcile"
   | "thumbnail.generate"
   | "transfer.execute"
   | "transfer.verify"
   | "ingest.analyze"
-  | "ingest.transfer";
+  | "ingest.transfer"
+  | "quarantine.execute"
+  | "quarantine.restore";
 
 /** Known kinds get autocomplete while plugins may register namespaced kinds. */
 export type JobKind = KnownJobKind | (string & {});

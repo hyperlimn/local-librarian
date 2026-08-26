@@ -222,8 +222,9 @@ export class SqliteInventoryCatalog implements InventoryCatalog {
     this.#database.exec("PRAGMA journal_mode = WAL");
     this.#database.exec("PRAGMA synchronous = FULL");
     this.#database.exec(
-      `PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMilliseconds ?? 5_000))}`,
+      `PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMilliseconds ?? 15_000))}`,
     );
+    this.#database.exec("PRAGMA wal_autocheckpoint = 1000");
     this.#database.exec(SCHEMA);
   }
 

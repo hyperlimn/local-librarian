@@ -20,9 +20,11 @@ export type OrganizationStrategy =
 
 export type OrganizationScope = "top-level" | "all-files";
 export type OrganizationCollisionPolicy = "skip" | "rename-with-suffix";
+export type OrganizationPhilosophy = "conservative" | "balanced" | "deep";
 
 export interface OrganizationPlanOptions {
   readonly strategy: OrganizationStrategy;
+  readonly philosophy: OrganizationPhilosophy;
   readonly scope: OrganizationScope;
   readonly targetDirectory: RootRelativePath;
   readonly collisionPolicy: OrganizationCollisionPolicy;
@@ -40,6 +42,8 @@ export interface OrganizationPlanCounts {
   readonly hiddenExcluded: number;
   readonly conflictsSkipped: number;
   readonly limitedOut: number;
+  readonly preservedCoherentGroups: number;
+  readonly needsReviewExcluded: number;
   readonly byCategory: Readonly<Record<string, number>>;
 }
 

@@ -37,6 +37,7 @@ export interface McpReconciliationTools {
  * nothing; it only reads through the existing InventoryCatalog port.
  */
 export class ReconciliationService implements McpReconciliationTools {
+  static readonly LEGACY_MAXIMUM_RECORDS = 20_000;
   public constructor(private readonly catalog: InventoryCatalog) {}
 
   public async compare(
@@ -92,6 +93,11 @@ export class ReconciliationService implements McpReconciliationTools {
         ...(cursor === undefined ? {} : { cursor }),
       });
       records.push(...page.items);
+      if (records.length > ReconciliationService.LEGACY_MAXIMUM_RECORDS) {
+        throw new Error(
+          "This compatibility comparison is bounded to 20,000 records. Use the persisted scans.reconcile job for large libraries.",
+        );
+      }
       if (page.nextCursor === undefined) break;
       cursor = page.nextCursor;
     }

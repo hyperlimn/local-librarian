@@ -215,8 +215,9 @@ export class SqliteOrganizationStore {
     this.#database.exec("PRAGMA journal_mode = WAL");
     this.#database.exec("PRAGMA synchronous = FULL");
     this.#database.exec(
-      `PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMilliseconds ?? 5_000))}`,
+      `PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMilliseconds ?? 15_000))}`,
     );
+    this.#database.exec("PRAGMA wal_autocheckpoint = 1000");
     this.#database.exec(SCHEMA);
     const now = this.#now();
     this.#database.prepare(`INSERT OR IGNORE INTO organization_settings (
@@ -470,7 +471,10 @@ export class SqliteOrganizationStore {
   ): Promise<OrganizationRun> {
     return this.#transaction(() => {
       const row = this.#requireRunRow(runId);
-      if (["completed", "partial", "failed", "cancelled"].includes(row.status)) {
+      // A retryable worker failure may leave the run failed while the queue has
+      // legitimately re-queued the same bound job. Let that leased retry return
+      // to running; completed, partial, and cancelled runs remain terminal.
+      if (["completed", "partial", "cancelled"].includes(row.status)) {
         return this.#runFromRow(row);
       }
       this.#database.prepare(`UPDATE organization_runs SET
@@ -807,14 +811,23 @@ export class SqliteOrganizationStore {
 }
 
 function planFromRow(row: PlanRow): OrganizationPlan {
+  const persistedOptions = JSON.parse(row.options_json) as Partial<OrganizationPlan["options"]>;
+  const persistedCounts = JSON.parse(row.counts_json) as Partial<OrganizationPlan["counts"]>;
   return {
     id: row.id,
     rootId: row.root_id as OrganizationPlan["rootId"],
     rootIdentityKey: row.root_identity_key,
     scanId: row.scan_id as OrganizationPlan["scanId"],
     status: row.status,
-    options: JSON.parse(row.options_json) as OrganizationPlan["options"],
-    counts: JSON.parse(row.counts_json) as OrganizationPlan["counts"],
+    options: {
+      ...persistedOptions,
+      philosophy: persistedOptions.philosophy ?? "balanced",
+    } as OrganizationPlan["options"],
+    counts: {
+      ...persistedCounts,
+      preservedCoherentGroups: persistedCounts.preservedCoherentGroups ?? 0,
+      needsReviewExcluded: persistedCounts.needsReviewExcluded ?? 0,
+    } as OrganizationPlan["counts"],
     createdAt: row.created_at,
     createdBy: row.created_by,
   };

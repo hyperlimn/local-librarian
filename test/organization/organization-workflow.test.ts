@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,6 +51,36 @@ afterEach(async () => {
 });
 
 describe("turnkey organization workflow", () => {
+  it("enforces live-enable and read-only confirmations independently", async () => {
+    const harness = await trackedHarness();
+
+    await expect(harness.service.setMutationMode(
+      "live",
+      "test-user",
+      "DISABLE",
+    )).rejects.toThrow("ENABLE LIVE FILE MUTATION");
+    await expect(harness.organization.mutationMode()).resolves.toMatchObject({ mode: "read-only" });
+
+    await expect(harness.service.setMutationMode(
+      "live",
+      "test-user",
+      "ENABLE LIVE FILE MUTATION",
+    )).resolves.toMatchObject({ mode: "live" });
+
+    await expect(harness.service.setMutationMode(
+      "read-only",
+      "test-user",
+      "ENABLE LIVE FILE MUTATION",
+    )).rejects.toThrow("DISABLE");
+    await expect(harness.organization.mutationMode()).resolves.toMatchObject({ mode: "live" });
+
+    await expect(harness.service.setMutationMode(
+      "read-only",
+      "test-user",
+      "DISABLE",
+    )).resolves.toMatchObject({ mode: "read-only" });
+  });
+
   it("builds a conservative plan and simulates it without mutating files", async () => {
     const harness = await trackedHarness();
     await writeFile(path.join(harness.fixture.rootPath, "vacation.jpg"), "image", "utf8");
@@ -289,6 +319,95 @@ describe("turnkey organization workflow", () => {
     });
     await expect(readFile(source, "utf8")).resolves.toBe("source-version");
     await expect(readFile(destination, "utf8")).resolves.toBe("existing-version");
+  });
+
+  it("recovers a rename completed before its durable receipt was recorded", async () => {
+    const harness = await trackedHarness();
+    const source = path.join(harness.fixture.rootPath, "recovery.jpg");
+    await writeFile(source, "rename crash window", "utf8");
+    await harness.scan();
+    const plan = await harness.service.createPlan({
+      rootId: harness.fixture.root.id,
+      strategy: "category",
+      createdBy: "test-user",
+    });
+    const operation = (await harness.organization.listOperations(plan.id)).items[0]!;
+    const destination = path.join(
+      harness.fixture.rootPath,
+      ...operation.destinationRelativePath.split("/"),
+    );
+    await harness.fixture.service.setLibraryWriteAccess(
+      harness.fixture.root.id,
+      true,
+      "test-user",
+    );
+    await harness.service.setMutationMode(
+      "live",
+      "test-user",
+      "ENABLE LIVE FILE MUTATION",
+    );
+    const run = await harness.service.startRun({
+      planId: plan.id,
+      mode: "live",
+      approvedBy: "test-user",
+      confirmation: "APPLY 1 FILE MOVES",
+    });
+
+    await mkdir(path.dirname(destination), { recursive: true });
+    await rename(source, destination);
+    await harness.worker.runOnce();
+
+    expect(await harness.organization.getRun(run.id)).toMatchObject({
+      status: "completed",
+      counts: { succeeded: 1, failed: 0, skipped: 0 },
+    });
+    expect((await harness.organization.listRunItems(run.id)).items).toEqual([
+      expect.objectContaining({ outcome: "already-completed" }),
+    ]);
+    await expect(readFile(destination, "utf8")).resolves.toBe("rename crash window");
+    await expect(pathExists(source)).resolves.toBe(false);
+  });
+
+  it("fails closed when an enrolled volume disconnects before execution", async () => {
+    const harness = await trackedHarness();
+    const source = path.join(harness.fixture.rootPath, "offline.pdf");
+    await writeFile(source, "offline but preserved", "utf8");
+    await harness.scan();
+    const plan = await harness.service.createPlan({
+      rootId: harness.fixture.root.id,
+      strategy: "category",
+      createdBy: "test-user",
+    });
+    await harness.fixture.service.setLibraryWriteAccess(
+      harness.fixture.root.id,
+      true,
+      "test-user",
+    );
+    await harness.service.setMutationMode(
+      "live",
+      "test-user",
+      "ENABLE LIVE FILE MUTATION",
+    );
+    const run = await harness.service.startRun({
+      planId: plan.id,
+      mode: "live",
+      approvedBy: "test-user",
+      confirmation: "APPLY 1 FILE MOVES",
+    });
+    const disconnectedPath = `${harness.fixture.rootPath}-disconnected`;
+    await rename(harness.fixture.rootPath, disconnectedPath);
+
+    await harness.worker.runOnce();
+
+    expect(await harness.organization.getRun(run.id)).toMatchObject({ status: "failed" });
+    await expect(readFile(path.join(disconnectedPath, "offline.pdf"), "utf8"))
+      .resolves.toBe("offline but preserved");
+    await expect(pathExists(path.join(
+      disconnectedPath,
+      "Organized",
+      "Documents",
+      "offline.pdf",
+    ))).resolves.toBe(false);
   });
 
   it.runIf(process.platform !== "win32")(

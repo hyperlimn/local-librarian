@@ -35,6 +35,7 @@ export function OrganizePage() {
   const [runItemNextCursor, setRunItemNextCursor] = useState<string>();
   const [runItemHistory, setRunItemHistory] = useState<string[]>([]);
   const [strategy, setStrategy] = useState<OrganizationPlan["options"]["strategy"]>("category-and-year");
+  const [philosophy, setPhilosophy] = useState<OrganizationPlan["options"]["philosophy"]>("balanced");
   const [scope, setScope] = useState<OrganizationPlan["options"]["scope"]>("top-level");
   const [targetDirectory, setTargetDirectory] = useState("Organized");
   const [collisionPolicy, setCollisionPolicy] = useState<OrganizationPlan["options"]["collisionPolicy"]>("rename-with-suffix");
@@ -165,6 +166,7 @@ export function OrganizePage() {
       const plan = await post<OrganizationPlan>("/api/organization/plans", {
         rootId,
         strategy,
+        philosophy,
         scope,
         targetDirectory,
         collisionPolicy,
@@ -260,6 +262,11 @@ export function OrganizePage() {
     setRunItemCursor(previous.length === 0 ? undefined : previous);
   }
 
+  function choosePhilosophy(nextPhilosophy: OrganizationPlan["options"]["philosophy"]) {
+    setPhilosophy(nextPhilosophy);
+    setScope(nextPhilosophy === "deep" ? "all-files" : "top-level");
+  }
+
   const scan = selectedLibrary?.summary.latestScan;
   const canPlan = selectedLibrary?.root.approval.status === "approved" && scan?.status === "completed";
   const liveReady = system?.mutationMode.mode === "live" &&
@@ -298,10 +305,15 @@ export function OrganizePage() {
         <div>
           <span className="eyebrow">1 · Choose a policy</span>
           <h2>Create a fresh plan</h2>
-          <p>Top-level scope preserves folders that may already carry meaning. “All files” intentionally flattens files into the new structure.</p>
+          <p>Choose how much change is appropriate. Local Librarian keeps detected projects, albums, sidecars, and other coherent groups together in every mode.</p>
           {!canPlan && <p className="inline-error">A completed inventory scan of an approved library is required. <a href="#inventory">Open inventory →</a></p>}
         </div>
         <div className="organize-form">
+          <div className="philosophy-grid">
+            <PhilosophyChoice name="Conservative Cleanup" value="conservative" selected={philosophy} onSelect={choosePhilosophy}>Loose files and obvious cleanup; existing folders stay intact.</PhilosophyChoice>
+            <PhilosophyChoice name="Balanced Organization" value="balanced" selected={philosophy} recommended onSelect={choosePhilosophy}>Improve messy areas while preserving meaningful structure.</PhilosophyChoice>
+            <PhilosophyChoice name="Deep Organization" value="deep" selected={philosophy} onSelect={choosePhilosophy}>Permit broad restructuring while protecting coherent groups and uncertainty.</PhilosophyChoice>
+          </div>
           <label><span>Structure</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as typeof strategy)}><option value="category-and-year">Category, then year</option><option value="category">Category only</option><option value="year-and-month">Year, then month</option></select></label>
           <label><span>Scope</span><select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}><option value="top-level">Loose top-level files</option><option value="all-files">All files</option></select></label>
           <label><span>Destination folder</span><input value={targetDirectory} onChange={(event) => setTargetDirectory(event.target.value)} /></label>
@@ -314,17 +326,22 @@ export function OrganizePage() {
 
       <section>
         <div className="section-heading"><div><span className="eyebrow">2 · Review</span><h2>Saved plans</h2></div><span className="count-pill">{plans.length}</span></div>
-        {plans.length > 0 ? <div className="plan-tabs">{plans.map((plan) => <button className={plan.id === selectedPlanId ? "plan-tab plan-tab--active" : "plan-tab"} onClick={() => setSelectedPlanId(plan.id)} key={plan.id}><strong>{plan.counts.plannedMoves.toLocaleString()} moves</strong><span>{plan.options.strategy.replaceAll("-", " ")}</span><small>{formatDate(plan.createdAt)}</small></button>)}</div> : <div className="quiet-card">No plan has been created for this library.</div>}
+        {plans.length > 0 ? <div className="plan-tabs">{plans.map((plan) => <button className={plan.id === selectedPlanId ? "plan-tab plan-tab--active" : "plan-tab"} onClick={() => setSelectedPlanId(plan.id)} key={plan.id}><strong>{plan.counts.plannedMoves.toLocaleString()} moves</strong><span>{plan.options.philosophy} · {plan.options.strategy.replaceAll("-", " ")}</span><small>{formatDate(plan.createdAt)}</small></button>)}</div> : <div className="quiet-card">No plan has been created for this library.</div>}
       </section>
 
       {selectedPlan && <>
         <section className="plan-summary">
-          <div><span className="eyebrow">Plan snapshot</span><h2>{shortId(selectedPlan.id)}</h2><p>Based on immutable scan <code>{shortId(selectedPlan.scanId)}</code>.</p></div>
+          <div><span className="eyebrow">{selectedPlan.options.philosophy} plan</span><h2>{shortId(selectedPlan.id)}</h2><p>{philosophyExplanation(selectedPlan.options.philosophy)} Based on immutable scan <code>{shortId(selectedPlan.scanId)}</code>.</p></div>
           <PlanMetric value={selectedPlan.counts.plannedMoves.toLocaleString()} label="Moves" />
           <PlanMetric value={formatBytes(selectedPlan.counts.representedBytes)} label="Represented" />
           <PlanMetric value={selectedPlan.counts.preservedByScope.toLocaleString()} label="Folders preserved" />
           <PlanMetric value={selectedPlan.counts.hiddenExcluded.toLocaleString()} label="Hidden excluded" />
         </section>
+        {(selectedPlan.counts.preservedCoherentGroups > 0 || selectedPlan.counts.needsReviewExcluded > 0) && <section className="plan-evidence">
+          <strong>Why some files are staying put</strong>
+          <span>{selectedPlan.counts.preservedCoherentGroups.toLocaleString()} files are protected by coherent project/media relationships.</span>
+          <span>{selectedPlan.counts.needsReviewExcluded.toLocaleString()} uncertain files are excluded until a person resolves them.</span>
+        </section>}
         <section>
           <div className="section-heading"><div><h2>Move preview</h2><p>Every destination is root-relative; no existing destination will be overwritten.</p></div><span className="count-pill">{selectedPlan.counts.plannedMoves.toLocaleString()}</span></div>
           <div className="table-shell"><table className="inventory-table move-table"><thead><tr><th>#</th><th>From</th><th>To</th><th>Why</th><th className="numeric">Size</th></tr></thead><tbody>{operations.map((operation) => <tr key={operation.id}><td>{operation.ordinal + 1}</td><td><code>{operation.sourceRelativePath}</code></td><td><code>{operation.destinationRelativePath}</code></td><td>{operation.rationale}</td><td className="numeric">{formatBytes(operation.expected.byteLength)}</td></tr>)}{operations.length === 0 && <tr><td colSpan={5} className="empty-table">This scan is already organized under the selected policy.</td></tr>}</tbody></table></div>
@@ -358,6 +375,23 @@ export function OrganizePage() {
 
 function PlanMetric({ value, label }: { readonly value: string; readonly label: string }) {
   return <div className="metric"><strong>{value}</strong><span>{label}</span></div>;
+}
+
+function PhilosophyChoice({ name, value, selected, recommended = false, onSelect, children }: {
+  readonly name: string;
+  readonly value: OrganizationPlan["options"]["philosophy"];
+  readonly selected: OrganizationPlan["options"]["philosophy"];
+  readonly recommended?: boolean;
+  readonly onSelect: (value: OrganizationPlan["options"]["philosophy"]) => void;
+  readonly children: string;
+}) {
+  return <button type="button" className={`philosophy-choice ${selected === value ? "philosophy-choice--active" : ""}`} aria-pressed={selected === value} onClick={() => onSelect(value)}><span><strong>{name}</strong>{recommended && <em>Recommended</em>}</span><small>{children}</small></button>;
+}
+
+function philosophyExplanation(philosophy: OrganizationPlan["options"]["philosophy"]): string {
+  if (philosophy === "conservative") return "Preserves existing folders and focuses on loose, high-confidence material.";
+  if (philosophy === "deep") return "Allows broad restructuring but still protects relationships and unresolved uncertainty.";
+  return "Improves messy areas while retaining meaningful existing structure.";
 }
 
 async function startWorkerQuietly(): Promise<void> {

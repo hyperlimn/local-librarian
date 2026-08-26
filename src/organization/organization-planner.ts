@@ -20,10 +20,15 @@ import type {
   OrganizationStrategy,
 } from "./organization.js";
 import type { SqliteOrganizationStore } from "./organization-store.js";
+import type {
+  OrganizationPlanningEvidence,
+  SqliteIntelligenceStore,
+} from "../intelligence/index.js";
 
 export interface CreateOrganizationPlanInput {
   readonly rootId: LibraryRootId;
   readonly strategy?: OrganizationStrategy;
+  readonly philosophy?: import("./organization.js").OrganizationPhilosophy;
   readonly scope?: OrganizationScope;
   readonly targetDirectory?: string;
   readonly collisionPolicy?: OrganizationCollisionPolicy;
@@ -50,6 +55,7 @@ export class OrganizationPlannerService {
     private readonly clock: () => Date = () => new Date(),
     private readonly platform: "win32" | "posix" =
       process.platform === "win32" ? "win32" : "posix",
+    private readonly intelligence?: SqliteIntelligenceStore,
   ) {
     this.#boundary = new PathBoundary(platform);
   }
@@ -90,6 +96,8 @@ export class OrganizationPlannerService {
     let hiddenExcluded = 0;
     let conflictsSkipped = 0;
     let limitedOut = 0;
+    let preservedCoherentGroups = 0;
+    let needsReviewExcluded = 0;
 
     let cursor: string | undefined;
     for (;;) {
@@ -99,6 +107,9 @@ export class OrganizationPlannerService {
         ...(cursor === undefined ? {} : { cursor }),
         entryType: "file",
       });
+      const planningEvidence = this.intelligence === undefined
+        ? new Map<string, OrganizationPlanningEvidence>()
+        : await this.intelligence.organizationPlanningEvidence(page.items.map((record) => record.id));
       for (const record of page.items) {
         if (record.observationStatus !== "observed") continue;
         scannedFiles += 1;
@@ -114,8 +125,17 @@ export class OrganizationPlannerService {
           alreadyOrganized += 1;
           continue;
         }
-        if (options.scope === "top-level" && hasParent(record.relativePath)) {
+        const evidence = planningEvidence.get(record.id);
+        if ((options.scope === "top-level" || options.philosophy === "conservative") && hasParent(record.relativePath)) {
           preservedByScope += 1;
+          continue;
+        }
+        if ((evidence?.semanticGroups.length ?? 0) > 0) {
+          preservedCoherentGroups += 1;
+          continue;
+        }
+        if (evidence?.uncertainty === "needs-review") {
+          needsReviewExcluded += 1;
           continue;
         }
 
@@ -124,8 +144,8 @@ export class OrganizationPlannerService {
           limitedOut += 1;
           continue;
         }
-        const category = categorizeInventoryFile(record);
-        const desired = destinationFor(record, category, options);
+        const category = evidence?.category ?? categorizeInventoryFile(record);
+        const desired = destinationFor(record, category, options, evidence?.captureAt);
         const destination = await this.availableDestination(
           input.rootId,
           scan.id,
@@ -149,7 +169,7 @@ export class OrganizationPlannerService {
           sourceRelativePath: record.relativePath,
           destinationRelativePath: destination,
           category,
-          rationale: rationaleFor(category, record, options),
+          rationale: rationaleFor(category, record, options, evidence),
           expected: {
             byteLength: record.byteLength ?? 0,
             ...(record.modifiedAt === undefined ? {} : { modifiedAt: record.modifiedAt }),
@@ -185,6 +205,8 @@ export class OrganizationPlannerService {
         hiddenExcluded,
         conflictsSkipped,
         limitedOut,
+        preservedCoherentGroups,
+        needsReviewExcluded,
         byCategory,
       },
       createdAt: this.clock().toISOString(),
@@ -192,6 +214,25 @@ export class OrganizationPlannerService {
     };
     await this.store.createPlan(plan, operations);
     return plan;
+  }
+
+  public async assertPlanFresh(plan: OrganizationPlan): Promise<void> {
+    const [root, summary] = await Promise.all([
+      this.loadApprovedLibrary(plan.rootId),
+      this.catalog.summary(plan.rootId),
+    ]);
+    if (root.identity.key !== plan.rootIdentityKey) {
+      throw new OrganizationPlanningError(
+        "STALE_PLAN",
+        "The library identity changed after this plan was created. Build a new plan.",
+      );
+    }
+    if (summary.latestScan?.id !== plan.scanId || summary.latestScan.status !== "completed") {
+      throw new OrganizationPlanningError(
+        "STALE_PLAN",
+        "A newer inventory exists or is in progress. Build a fresh organization plan before execution.",
+      );
+    }
   }
 
   private validateOptions(
@@ -205,7 +246,11 @@ export class OrganizationPlannerService {
     if (!["category", "category-and-year", "year-and-month"].includes(strategy)) {
       throw new OrganizationPlanningError("INVALID_STRATEGY", "Unknown organization strategy.");
     }
-    const scope = input.scope ?? "top-level";
+    const philosophy = input.philosophy ?? "balanced";
+    if (!["conservative", "balanced", "deep"].includes(philosophy)) {
+      throw new OrganizationPlanningError("INVALID_PHILOSOPHY", "Unknown organization philosophy.");
+    }
+    const scope = input.scope ?? (philosophy === "deep" ? "all-files" : "top-level");
     if (!["top-level", "all-files"].includes(scope)) {
       throw new OrganizationPlanningError("INVALID_SCOPE", "Unknown organization scope.");
     }
@@ -238,6 +283,7 @@ export class OrganizationPlannerService {
     }
     return {
       strategy,
+      philosophy,
       scope,
       targetDirectory: target,
       collisionPolicy,
@@ -292,8 +338,9 @@ function destinationFor(
   record: InventoryRecord,
   category: string,
   options: OrganizationPlanOptions,
+  captureAt?: string,
 ): RootRelativePath {
-  const date = usableDate(record.modifiedAt) ?? usableDate(record.createdAt);
+  const date = usableDate(captureAt) ?? usableDate(record.modifiedAt) ?? usableDate(record.createdAt);
   const year = date?.slice(0, 4) ?? "Unknown year";
   const month = date?.slice(5, 7) ?? "Unknown month";
   const segments = options.strategy === "category"
@@ -308,13 +355,17 @@ function rationaleFor(
   category: string,
   record: InventoryRecord,
   options: OrganizationPlanOptions,
+  evidence?: OrganizationPlanningEvidence,
 ): string {
   const extension = record.extension?.toLocaleLowerCase("en-US") ?? "no extension";
   if (options.strategy === "category") {
-    return `${extension} files are grouped in ${category}.`;
+    return evidence?.explanation === undefined
+      ? `${extension} files are grouped in ${category}.`
+      : `${evidence.explanation} The ${options.philosophy} plan groups it in ${category}.`;
   }
   if (options.strategy === "category-and-year") {
-    return `${extension} files are grouped in ${category}, then by observed year.`;
+    return `${evidence?.explanation ?? `${extension} files are classified as ${category}.`} ` +
+      "The destination uses capture date when available, then observed filesystem dates.";
   }
   return "Files are grouped by observed year and month.";
 }

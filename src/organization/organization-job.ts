@@ -194,6 +194,7 @@ class OrganizationExecutionEngine {
             : await this.rollback(root, operation, run.mode, () =>
                 this.validateRootAndMode(plan.rootId, plan.rootIdentityKey, run!.mode));
         } catch (error) {
+          if (error instanceof PostRenameVerificationIndeterminateError) throw error;
           outcome = {
             outcome: "failed",
             message: error instanceof Error ? error.message : "The operation failed.",
@@ -254,7 +255,7 @@ class OrganizationExecutionEngine {
       throw new JobHandlerFailure(
         code,
         error instanceof Error ? error.message : "Organization execution failed.",
-        false,
+        error instanceof PostRenameVerificationIndeterminateError,
         { runId: run.id, planId: run.planId },
       );
     }
@@ -351,11 +352,20 @@ class OrganizationExecutionEngine {
     await recheckGate();
     const finalDestination = await this.resolveProspective(root, to, "write");
     await rename(freshSource.authorization.canonicalPath, finalDestination.canonicalPath);
-    const verified = await this.inspectExisting(root, to, "read");
+    let verified: ExistingPath | undefined;
+    try {
+      verified = await this.inspectExisting(root, to, "read");
+    } catch (error) {
+      throw new PostRenameVerificationIndeterminateError(
+        `The rename completed, but destination verification could not finish at ${to}: ${
+          error instanceof Error ? error.message : "unknown verification error"
+        }. The durable job will retry and reconcile the filesystem state.`,
+      );
+    }
     if (verified === undefined || !matchesExpected(verified.stats, operation)) {
-      throw new OrganizationExecutionError(
-        "POST_MOVE_VERIFICATION_FAILED",
-        `The relocated file could not be verified at ${to}.`,
+      throw new PostRenameVerificationIndeterminateError(
+        `The rename completed, but the relocated file could not yet be verified at ${to}. ` +
+        "The durable job will retry without repeating a completed rename.",
       );
     }
     return {
@@ -507,6 +517,13 @@ export class OrganizationExecutionError extends Error {
   public constructor(public readonly code: string, message: string) {
     super(message);
     this.name = "OrganizationExecutionError";
+  }
+}
+
+class PostRenameVerificationIndeterminateError extends OrganizationExecutionError {
+  public constructor(message: string) {
+    super("POST_MOVE_VERIFICATION_INDETERMINATE", message);
+    this.name = "PostRenameVerificationIndeterminateError";
   }
 }
 

@@ -200,6 +200,38 @@ export class RootEnrollmentService {
     return updated;
   }
 
+  /** Independently gates ingest-source writes and retirement; both default off. */
+  public async setIngestSourceRetirementAccess(
+    id: IngestSourceId,
+    allowWrites: boolean,
+    allowSourceRetirement: boolean,
+    approvedBy: string,
+  ): Promise<ApprovedIngestSource> {
+    if (approvedBy.trim().length === 0) throw new Error("An approving actor is required.");
+    if (allowSourceRetirement && !allowWrites) {
+      throw new Error("Source retirement cannot be enabled while source writes are disabled.");
+    }
+    const existing = await this.store.get(id);
+    if (
+      existing === undefined || "controlDirectory" in existing.policy ||
+      existing.approval.status !== "approved"
+    ) {
+      throw new Error("The ingest source is not approved.");
+    }
+    const source = existing as ApprovedIngestSource;
+    const updated: ApprovedIngestSource = {
+      ...source,
+      approval: {
+        status: "approved",
+        approvedAt: this.now(),
+        approvedBy: approvedBy.trim(),
+      },
+      policy: { ...source.policy, allowWrites, allowSourceRetirement },
+    };
+    await this.store.saveApproved(updated);
+    return updated;
+  }
+
   public async revoke(
     id: EnrolledRootId,
     reason: string,

@@ -1,11 +1,11 @@
 {
   "name": "local-librarian",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "A local-first, safety-gated application for inventorying and organizing messy file libraries.",
+  "description": "A local-first, safety-gated application for understanding, reconciling, ingesting, and organizing file libraries.",
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",

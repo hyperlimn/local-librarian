@@ -48,6 +48,8 @@ heartbeat-status.json
 
 # Logs and temporary/test output
 *.log
+*.orig
+codex-session-*.md
 tmp/
 .tmp/
 temp/

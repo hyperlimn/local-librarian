@@ -557,7 +557,7 @@ function observedRecord(
     ...timestamps(stats),
     deviceId: stats.dev.toString(),
     filesystemRecordId: stats.ino.toString(),
-    attributes: attributes(name, stats.mode),
+    attributes: inventoryEntryAttributes(name, stats.mode),
     contentIdentity: { status: "not-requested" },
     observedAt,
   };
@@ -596,7 +596,7 @@ function issueRecord(
           deviceId: stats.dev.toString(),
           filesystemRecordId: stats.ino.toString(),
         }),
-    attributes: stats === undefined ? attributes(name) : attributes(name, stats.mode),
+    attributes: stats === undefined ? inventoryEntryAttributes(name) : inventoryEntryAttributes(name, stats.mode),
     contentIdentity: { status: "not-requested" },
     issue: { code, message },
     observedAt,
@@ -693,10 +693,21 @@ function timestamps(stats: BigIntStats): {
   };
 }
 
-function attributes(name: string, mode?: bigint): {
-  readonly hidden: boolean;
+/**
+ * Node's portable Stats object does not expose Windows HIDDEN, SYSTEM, or
+ * READONLY flags. Recording false values from POSIX conventions on Windows
+ * would be fabricated evidence, so those facts remain unknown until a native
+ * adapter is available. POSIX dot-prefix and permission bits are local facts.
+ */
+export function inventoryEntryAttributes(
+  name: string,
+  mode?: bigint,
+  platform: NodeJS.Platform = process.platform,
+): {
+  readonly hidden?: boolean;
   readonly readOnly?: boolean;
 } {
+  if (platform === "win32") return {};
   return {
     hidden: name.startsWith("."),
     ...(mode === undefined ? {} : { readOnly: (mode & 0o222n) === 0n }),

@@ -39,7 +39,11 @@ const EXTENSION_CATEGORIES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 export function categorizeInventoryFile(record: InventoryRecord): string {
-  const extension = record.extension?.toLocaleLowerCase("en-US");
+  return categoryForExtension(record.extension);
+}
+
+export function categoryForExtension(extensionValue: string | undefined): string {
+  const extension = extensionValue?.toLocaleLowerCase("en-US");
   if (extension === undefined || extension.length === 0) return "Other";
   return EXTENSION_CATEGORIES[extension] ?? "Other";
 }
