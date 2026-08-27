@@ -21,7 +21,8 @@ HTTP service on the same computer.
 
 Prerequisites:
 
-- Node.js `^20.19.0` or `>=22.12.0` (the included `.nvmrc` selects 22.12.0)
+- Node.js 22.13.0 or newer (the included `.nvmrc` selects 22.13.0;
+  `node:sqlite` is available without an experimental flag)
 - npm
 
 ```sh
