@@ -17,11 +17,6 @@ HTTP service on the same computer.
 > Librarian never overwrites a destination and has no permanent-delete feature.
 > Keep normal backups of important data.
 
-> **License status:** this repository does not currently contain a `LICENSE`
-> file. Public visibility alone does not grant reuse or redistribution rights.
-> The repository owner should choose and add a license before inviting external
-> contributions or reuse.
-
 ## Quick start
 
 Prerequisites:
@@ -407,3 +402,9 @@ requirements. Failures or absence degrade to bounded built-in evidence and
 Needs Review rather than silently granting mutation authority.
 
 See [CHANGELOG.md](CHANGELOG.md) for the V2 release summary.
+
+## License
+
+Copyright 2026 Hyperlimn.
+
+Local Librarian is licensed under the [Apache License 2.0](LICENSE).
